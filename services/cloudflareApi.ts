@@ -3,7 +3,7 @@ import { CloudflareCredentials, ApiResponse } from '../types';
 
 export class CloudflareService {
   private creds: CloudflareCredentials;
-  private baseUrl = 'https://api.cloudflare.com/client/v4';
+  private baseUrl = import.meta.env.DEV ? '/api' : 'https://api.cloudflare.com/client/v4';
 
   constructor(creds: CloudflareCredentials) {
     this.creds = creds;
@@ -62,6 +62,23 @@ export class CloudflareService {
   // DNS
   async getDnsSettings() {
     return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/dns`);
+  }
+
+  async listZoneDnsRecords() {
+    return this.request<any[]>(`/zones/${this.creds.zoneId}/dns_records?per_page=100`);
+  }
+
+  async createZoneDnsRecord(record: { type: string; name: string; content: string; ttl?: number; priority?: number }) {
+    return this.request<any>(`/zones/${this.creds.zoneId}/dns_records`, {
+      method: 'POST',
+      body: JSON.stringify(record),
+    });
+  }
+
+  async deleteZoneDnsRecord(id: string) {
+    return this.request<any>(`/zones/${this.creds.zoneId}/dns_records/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // Rules

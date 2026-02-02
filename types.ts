@@ -50,9 +50,15 @@ export interface EmailRoutingRule {
 export interface DNSRecord {
   content: string;
   name: string;
-  priority: number;
+  priority?: number;
   type: string;
   ttl: number;
+}
+
+export interface ZoneDnsRecord extends DNSRecord {
+  id: string;
+  modified_on?: string;
+  created_on?: string;
 }
 
 export interface ApiResponse<T> {

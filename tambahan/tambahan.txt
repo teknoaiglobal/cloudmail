@@ -1,0 +1,419 @@
+Email Routing
+email_routing
+
+Methods
+
+
+Get Email Routing Settings -> Envelope<Settings>
+get
+/zones/{zone_id}/email/routing
+Get information about the settings for your Email Routing zone.
+
+Security
+API Email + API Key
+The previous authorization scheme for interacting with the Cloudflare API, used in conjunction with a Global API key.
+
+Example: X-Auth-Email: user@example.com
+
+The previous authorization scheme for interacting with the Cloudflare API. When possible, use API tokens instead of Global API keys.
+
+Example: X-Auth-Key: 144c9defac04969c7bfad8efaa8ea194
+
+Accepted Permissions (at least one required)
+Zone Settings Write Zone Settings Read
+
+path Parameters
+zone_id: string
+(maxLength: 32)
+Identifier.
+
+Response fields
+
+errors: Array<{ code, message, documentation_url, 1 more... }>
+
+messages: Array<{ code, message, documentation_url, 1 more... }>
+
+success: true
+Whether the API call was successful.
+
+result: SettingsOptional
+cURL
+
+curl https://api.cloudflare.com/client/v4/zones/$ZONE_ID/email/routing \
+    -H "X-Auth-Email: $CLOUDFLARE_EMAIL" \
+    -H "X-Auth-Key: $CLOUDFLARE_API_KEY"
+200
+Example
+
+{
+  "errors": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "success": true,
+  "result": {
+    "id": "75610dab9e69410a82cf7e400a09ecec",
+    "enabled": true,
+    "name": "example.net",
+    "created": "2014-01-02T02:20:00Z",
+    "modified": "2014-01-02T02:20:00Z",
+    "skip_wizard": true,
+    "status": "ready",
+    "tag": "75610dab9e69410a82cf7e400a09ecec"
+  }
+}
+
+Disable Email Routing -> Envelope<Settings>
+Deprecated
+post
+/zones/{zone_id}/email/routing/disable
+Disable your Email Routing zone. Also removes additional MX records previously required for Email Routing to work.
+
+Security
+API Email + API Key
+The previous authorization scheme for interacting with the Cloudflare API, used in conjunction with a Global API key.
+
+Example: X-Auth-Email: user@example.com
+
+The previous authorization scheme for interacting with the Cloudflare API. When possible, use API tokens instead of Global API keys.
+
+Example: X-Auth-Key: 144c9defac04969c7bfad8efaa8ea194
+
+Accepted Permissions (at least one required)
+Zone Settings Write
+
+path Parameters
+zone_id: string
+(maxLength: 32)
+Identifier.
+
+Body parameters
+body: unknown
+Response fields
+
+errors: Array<{ code, message, documentation_url, 1 more... }>
+
+messages: Array<{ code, message, documentation_url, 1 more... }>
+
+success: true
+Whether the API call was successful.
+
+result: SettingsOptional
+cURL
+
+curl https://api.cloudflare.com/client/v4/zones/$ZONE_ID/email/routing/disable \
+    -H 'Content-Type: application/json' \
+    -H "X-Auth-Email: $CLOUDFLARE_EMAIL" \
+    -H "X-Auth-Key: $CLOUDFLARE_API_KEY" \
+    -d '{}'
+200
+Example
+
+{
+  "errors": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "success": true,
+  "result": {
+    "id": "75610dab9e69410a82cf7e400a09ecec",
+    "enabled": true,
+    "name": "example.net",
+    "created": "2014-01-02T02:20:00Z",
+    "modified": "2014-01-02T02:20:00Z",
+    "skip_wizard": true,
+    "status": "ready",
+    "tag": "75610dab9e69410a82cf7e400a09ecec"
+  }
+}
+
+Enable Email Routing -> Envelope<Settings>
+Deprecated
+post
+/zones/{zone_id}/email/routing/enable
+Enable you Email Routing zone. Add and lock the necessary MX and SPF records.
+
+Domain types
+
+
+Settings = { id, enabled, name, 5 more... }
+Email Routing
+Addresses
+email_routing.addresses
+
+Methods
+
+
+List Destination Addresses -> V4PagePaginationArray<Address>
+get
+/accounts/{account_id}/email/routing/addresses
+Lists existing destination addresses.
+
+Security
+API Email + API Key
+The previous authorization scheme for interacting with the Cloudflare API, used in conjunction with a Global API key.
+
+Example: X-Auth-Email: user@example.com
+
+The previous authorization scheme for interacting with the Cloudflare API. When possible, use API tokens instead of Global API keys.
+
+Example: X-Auth-Key: 144c9defac04969c7bfad8efaa8ea194
+
+Accepted Permissions (at least one required)
+Email Routing Addresses Write Email Routing Addresses Read
+
+path Parameters
+account_id: string
+(maxLength: 32)
+Identifier.
+
+query Parameters
+
+direction: Optional
+(default: "asc")
+Sorts results in an ascending or descending order.
+
+"asc"
+"desc"
+page: numberOptional
+(minimum: 1, default: 1)
+Page number of paginated results.
+
+per_page: numberOptional
+(maximum: 50, minimum: 5, default: 20)
+Maximum number of results per page.
+
+
+verified: Optional
+(default: true)
+Filter by verified destination addresses.
+
+true
+false
+Response fields
+
+errors: Array<{ code, message, documentation_url, 1 more... }>
+
+messages: Array<{ code, message, documentation_url, 1 more... }>
+
+success: true
+Whether the API call was successful.
+
+
+result: Array<Address>Optional
+
+result_info: { count, page, per_page, 1 more... }Optional
+cURL
+
+curl https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/email/routing/addresses \
+    -H "X-Auth-Email: $CLOUDFLARE_EMAIL" \
+    -H "X-Auth-Key: $CLOUDFLARE_API_KEY"
+200
+Example
+
+{
+  "errors": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "code": 1000,
+      "message": "message",
+      "documentation_url": "documentation_url",
+      "source": {
+        "pointer": "pointer"
+      }
+    }
+  ],
+  "success": true,
+  "result": [
+    {
+      "id": "ea95132c15732412d22c1476fa83f27a",
+      "created": "2014-01-02T02:20:00Z",
+      "email": "user@example.com",
+      "modified": "2014-01-02T02:20:00Z",
+      "tag": "ea95132c15732412d22c1476fa83f27a",
+      "verified": "2014-01-02T02:20:00Z"
+    }
+  ],
+  "result_info": {
+    "count": 1,
+    "page": 1,
+    "per_page": 20,
+    "total_count": 1
+  }
+}
+
+Get A Destination Address -> Envelope<Address>
+get
+/accounts/{account_id}/email/routing/addresses/{destination_address_identifier}
+Gets information for a specific destination email already created.
+
+
+Create A Destination Address -> Envelope<Address>
+post
+/accounts/{account_id}/email/routing/addresses
+Create a destination address to forward your emails to. Destination addresses need to be verified before they can be used.
+
+
+Delete Destination Address -> Envelope<Address>
+delete
+/accounts/{account_id}/email/routing/addresses/{destination_address_identifier}
+Deletes a specific destination address.
+
+Domain types
+
+
+Address = { id, created, email, 3 more... }
+Email Routing
+DNS
+email_routing.dns
+
+Methods
+
+
+Email Routing DNS Settings -> { errors, messages, success, 2 more... } | { errors, messages, success, 2 more... }
+get
+/zones/{zone_id}/email/routing/dns
+Show the DNS records needed to configure your Email Routing zone.
+
+
+Enable Email Routing -> Envelope<Settings>
+post
+/zones/{zone_id}/email/routing/dns
+Enable you Email Routing zone. Add and lock the necessary MX and SPF records.
+
+
+Unlock Email Routing -> Envelope<Settings>
+patch
+/zones/{zone_id}/email/routing/dns
+Unlock MX Records previously locked by Email Routing.
+
+
+Disable Email Routing -> SinglePage<DNSRecord>
+delete
+/zones/{zone_id}/email/routing/dns
+Disable your Email Routing zone. Also removes additional MX records previously required for Email Routing to work.
+
+Domain types
+
+
+DNSRecord = { content, name, priority, 2 more... }
+List of records needed to enable an Email Routing zone.
+
+Email Routing
+Rules
+email_routing.rules
+
+Methods
+
+
+List Routing Rules -> V4PagePaginationArray<EmailRoutingRule>
+get
+/zones/{zone_id}/email/routing/rules
+Lists existing routing rules.
+
+
+Get Routing Rule -> Envelope<EmailRoutingRule>
+get
+/zones/{zone_id}/email/routing/rules/{rule_identifier}
+Get information for a specific routing rule already created.
+
+
+Create Routing Rule -> Envelope<EmailRoutingRule>
+post
+/zones/{zone_id}/email/routing/rules
+Rules consist of a set of criteria for matching emails (such as an email being sent to a specific custom email address) plus a set of actions to take on the email (like forwarding it to a specific destination address).
+
+
+Update Routing Rule -> Envelope<EmailRoutingRule>
+put
+/zones/{zone_id}/email/routing/rules/{rule_identifier}
+Update actions and matches, or enable/disable specific routing rules.
+
+
+Delete Routing Rule -> Envelope<EmailRoutingRule>
+delete
+/zones/{zone_id}/email/routing/rules/{rule_identifier}
+Delete a specific routing rule.
+
+Domain types
+
+
+Action = { type, value }
+Actions pattern.
+
+
+EmailRoutingRule = { id, actions, enabled, 4 more... }
+
+Matcher = { type, field, value }
+Matching pattern to forward your actions.
+
+Email Routing
+Rules
+Catch Alls
+email_routing.rules.catch_alls
+
+Methods
+
+
+Get Catch All Rule -> Envelope<{ id, actions, enabled, 3 more... }>
+get
+/zones/{zone_id}/email/routing/rules/catch_all
+Get information on the default catch-all routing rule.
+
+
+Update Catch All Rule -> Envelope<{ id, actions, enabled, 3 more... }>
+put
+/zones/{zone_id}/email/routing/rules/catch_all
+Enable or disable catch-all routing rule, or change action to forward to specific destination address.
+
+Domain types
+
+
+CatchAllAction = { type, value }
+Action for the catch-all routing rule.
+
+
+CatchAllMatcher = { type }
+Matcher for catch-all routing rule.
+

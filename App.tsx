@@ -1,17 +1,29 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { CloudflareCredentials, Settings, Address, EmailRoutingRule, ApiResponse } from './types';
+import { CloudflareCredentials, Settings, Address, EmailRoutingRule, DNSRecord, ZoneDnsRecord, ApiResponse } from './types';
 import { CloudflareService } from './services/cloudflareApi';
 import { Layout } from './components/Layout';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 
 const App: React.FC = () => {
+  const loadCredentials = (): CloudflareCredentials | null => {
+    try {
+      const saved = localStorage.getItem('cf_creds');
+      if (!saved) return null;
+      return JSON.parse(saved);
+    } catch {
+      try {
+        localStorage.removeItem('cf_creds');
+      } catch {
+        return null;
+      }
+      return null;
+    }
+  };
+
   const [activeTab, setActiveTab] = useState('overview');
-  const [credentials, setCredentials] = useState<CloudflareCredentials | null>(() => {
-    const saved = localStorage.getItem('cf_creds');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [credentials, setCredentials] = useState<CloudflareCredentials | null>(loadCredentials);
 
   const api = useMemo(() => credentials ? new CloudflareService(credentials) : null, [credentials]);
 
@@ -20,13 +32,78 @@ const App: React.FC = () => {
   const [rules, setRules] = useState<EmailRoutingRule[]>([]);
   const [catchAll, setCatchAll] = useState<any>(null);
   const [dnsRecords, setDnsRecords] = useState<any>(null);
+  const [zoneDnsRecords, setZoneDnsRecords] = useState<ZoneDnsRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [subdomainInput, setSubdomainInput] = useState('');
+  const [subdomainLoading, setSubdomainLoading] = useState(false);
 
   const saveCredentials = (creds: CloudflareCredentials) => {
     setCredentials(creds);
-    localStorage.setItem('cf_creds', JSON.stringify(creds));
+    try {
+      localStorage.setItem('cf_creds', JSON.stringify(creds));
+    } catch {
+      setError('Gagal menyimpan kredensial di browser.');
+    }
   };
+
+  const emailRoutingRecords = useMemo(() => {
+    const list = Array.isArray(dnsRecords) ? dnsRecords : dnsRecords ? [dnsRecords] : [];
+    return list
+      .map((record: DNSRecord & { value?: string }) => ({
+        type: record.type,
+        content: record.content || record.value,
+        priority: record.priority,
+        ttl: record.ttl
+      }))
+      .filter((record) => record.type && record.content);
+  }, [dnsRecords]);
+
+  const refreshZoneDnsRecords = async () => {
+    if (!api) return;
+    try {
+      const zoneRecords = await api.listZoneDnsRecords();
+      setZoneDnsRecords(zoneRecords.result || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch DNS records');
+    }
+  };
+
+  const subdomainRows = useMemo(() => {
+    if (!settings?.name || emailRoutingRecords.length === 0) return [];
+    const domainName = settings.name.replace(/\.$/, '');
+    const matchesRequired = (record: ZoneDnsRecord) => emailRoutingRecords.some((req) => {
+      const reqPriority = req.priority ?? null;
+      const recordPriority = record.priority ?? null;
+      return req.type === record.type && req.content === record.content && (reqPriority === null || reqPriority === recordPriority);
+    });
+    const rows = new Map<string, { subdomain: string; matches: number; lastUpdate?: string }>();
+    zoneDnsRecords.forEach((record) => {
+      if (!record.name || !record.type || !record.content) return;
+      const name = record.name.replace(/\.$/, '');
+      if (!name.endsWith(domainName)) return;
+      if (!matchesRequired(record)) return;
+      const prefix = name === domainName ? '' : name.slice(0, -(domainName.length + 1));
+      if (!prefix) return;
+      const existing = rows.get(prefix);
+      const lastUpdate = record.modified_on || record.created_on;
+      if (existing) {
+        existing.matches += 1;
+        if (lastUpdate && (!existing.lastUpdate || new Date(lastUpdate) > new Date(existing.lastUpdate))) {
+          existing.lastUpdate = lastUpdate;
+        }
+      } else {
+        rows.set(prefix, { subdomain: prefix, matches: 1, lastUpdate });
+      }
+    });
+    const requiredCount = emailRoutingRecords.length;
+    return Array.from(rows.values()).map((row) => ({
+      ...row,
+      routingStatus: row.matches >= requiredCount ? 'Enabled' : 'Partial',
+      dnsStatus: row.matches >= requiredCount ? 'Configured' : 'Partial',
+      mxStatus: row.matches >= requiredCount ? 'Locked' : 'Unverified'
+    }));
+  }, [settings?.name, zoneDnsRecords, emailRoutingRecords]);
 
   const fetchData = async () => {
     if (!api) return;
@@ -45,6 +122,12 @@ const App: React.FC = () => {
       setRules(r.result);
       setCatchAll(ca.result);
       setDnsRecords(dns.result || dns);
+      try {
+        const zoneRecords = await api.listZoneDnsRecords();
+        setZoneDnsRecords(zoneRecords.result || []);
+      } catch (err: any) {
+        setZoneDnsRecords([]);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch data');
     } finally {
@@ -111,6 +194,85 @@ const App: React.FC = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddSubdomain = async () => {
+    if (!api || !settings) return;
+    const raw = subdomainInput.trim().toLowerCase();
+    if (!raw) return;
+    if (raw.includes(' ')) {
+      setError('Subdomain tidak valid.');
+      return;
+    }
+    if (emailRoutingRecords.length === 0) {
+      setError('Email routing DNS records belum tersedia.');
+      return;
+    }
+    try {
+      setSubdomainLoading(true);
+      const domainName = settings.name.replace(/\.$/, '');
+      const fullName = `${raw}.${domainName}`;
+      const existing = await api.listZoneDnsRecords();
+      const existingRecords = existing.result || [];
+      const toCreate = emailRoutingRecords.filter((req) => {
+        return !existingRecords.some((record: ZoneDnsRecord) => {
+          const reqPriority = req.priority ?? null;
+          const recordPriority = record.priority ?? null;
+          return record.name === fullName && record.type === req.type && record.content === req.content && (reqPriority === null || reqPriority === recordPriority);
+        });
+      });
+      if (toCreate.length === 0) {
+        await refreshZoneDnsRecords();
+        return;
+      }
+      await Promise.all(toCreate.map((record) => {
+        return api.createZoneDnsRecord({
+          type: record.type,
+          name: fullName,
+          content: record.content,
+          ttl: record.ttl ?? 1,
+          priority: record.priority
+        });
+      }));
+      setSubdomainInput('');
+      await refreshZoneDnsRecords();
+    } catch (err: any) {
+      setError(err.message || 'Gagal membuat subdomain.');
+    } finally {
+      setSubdomainLoading(false);
+    }
+  };
+
+  const handleDeleteSubdomain = async (subdomain: string) => {
+    if (!api || !settings) return;
+    if (!confirm('Hapus subdomain ini beserta DNS records Email Routing?')) return;
+    if (emailRoutingRecords.length === 0) {
+      setError('Email routing DNS records belum tersedia.');
+      return;
+    }
+    try {
+      setSubdomainLoading(true);
+      const domainName = settings.name.replace(/\.$/, '');
+      const fullName = `${subdomain}.${domainName}`;
+      const existing = await api.listZoneDnsRecords();
+      const existingRecords = existing.result || [];
+      const matchesRequired = (record: ZoneDnsRecord) => emailRoutingRecords.some((req) => {
+        const reqPriority = req.priority ?? null;
+        const recordPriority = record.priority ?? null;
+        return record.type === req.type && record.content === req.content && (reqPriority === null || reqPriority === recordPriority);
+      });
+      const toDelete = existingRecords.filter((record: ZoneDnsRecord) => record.name === fullName && matchesRequired(record));
+      if (toDelete.length === 0) {
+        await refreshZoneDnsRecords();
+        return;
+      }
+      await Promise.all(toDelete.map((record: ZoneDnsRecord) => api.deleteZoneDnsRecord(record.id)));
+      await refreshZoneDnsRecords();
+    } catch (err: any) {
+      setError(err.message || 'Gagal menghapus subdomain.');
+    } finally {
+      setSubdomainLoading(false);
     }
   };
 
@@ -389,6 +551,98 @@ const App: React.FC = () => {
             ) : (
               <div className="py-12 text-center text-slate-400">Loading catch-all settings...</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'subdomains' && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold">Subdomains</h3>
+              <p className="text-sm text-slate-500">Enable email routing for subdomains by adding the required DNS records.</p>
+            </div>
+            <div className="flex flex-col md:flex-row gap-3 items-end">
+              <div className="flex-1">
+                <Input
+                  label="Subdomain"
+                  placeholder="support"
+                  value={subdomainInput}
+                  onChange={(e) => setSubdomainInput(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleAddSubdomain}
+                isLoading={subdomainLoading}
+                disabled={!settings || emailRoutingRecords.length === 0 || !subdomainInput.trim()}
+              >
+                Add Subdomain
+              </Button>
+            </div>
+            {emailRoutingRecords.length === 0 && (
+              <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                Email routing DNS records belum tersedia. Pastikan email routing sudah enabled.
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-slate-200 text-slate-500">
+                  <tr>
+                    <th className="py-3 px-4 font-medium">Subdomain</th>
+                    <th className="py-3 px-4 font-medium">Routing Status</th>
+                    <th className="py-3 px-4 font-medium">Email DNS Records</th>
+                    <th className="py-3 px-4 font-medium">MX Records</th>
+                    <th className="py-3 px-4 font-medium">Last Update</th>
+                    <th className="py-3 px-4 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {subdomainRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400 italic">No subdomains configured.</td>
+                    </tr>
+                  ) : (
+                    subdomainRows.map((row) => (
+                      <tr key={row.subdomain} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4 font-medium">{row.subdomain}{settings?.name ? `.${settings.name}` : ''}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.routingStatus === 'Enabled' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {row.routingStatus}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.dnsStatus === 'Configured' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {row.dnsStatus}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.mxStatus === 'Locked' ? 'bg-slate-100 text-slate-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {row.mxStatus}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-500">
+                          {row.lastUpdate ? new Date(row.lastUpdate).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => handleDeleteSubdomain(row.subdomain)}
+                            className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50"
+                            disabled={subdomainLoading}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
