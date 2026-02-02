@@ -1,0 +1,5 @@
+{
+  "name": "Cloudflare Email Routing Manager",
+  "description": "A comprehensive dashboard for managing Cloudflare Email Routing settings, destination addresses, custom rules, and DNS configurations. Built with React and Tailwind for a seamless administrative experience.",
+  "requestFramePermissions": []
+}
