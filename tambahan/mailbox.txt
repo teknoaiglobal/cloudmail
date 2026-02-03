@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEKNO MAIL - Disposable Email</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom Font & Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(34, 211, 238, 0.3);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(34, 211, 238, 0.6);
+        }
+
+        /* Loading Spinner Animation */
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 selection:bg-cyan-500 selection:text-white overflow-hidden">
+
+    <!-- 1. LAYER BACKGROUND IMAGE -->
+    <div class="fixed inset-0 z-0 bg-cover bg-center"
+         style="background-image: url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop'); filter: brightness(0.6);">
+    </div>
+
+    <!-- 2. LAYER PARTICLE CANVAS -->
+    <canvas id="particle-canvas" class="fixed inset-0 z-0 pointer-events-none opacity-40 mix-blend-screen"></canvas>
+
+    <!-- 3. MAIN CONTENT -->
+    <div class="relative z-10 flex flex-col md:flex-row h-screen overflow-hidden">
+
+        <!-- SIDEBAR / ACCOUNT PANEL -->
+        <div class="w-full md:w-80 flex flex-col h-auto md:h-screen shadow-2xl border-r border-white/10 backdrop-blur-xl bg-slate-900/60 transition-all duration-300">
+            
+            <!-- Brand & Account Section -->
+            <div class="p-6 border-b border-white/10">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="relative group">
+                        <div class="absolute -inset-1 bg-gradient-to-r from-cyan-400 to-purple-600 rounded-lg blur opacity-25 group-hover:opacity-75 transition duration-1000 group-hover:duration-200"></div>
+                        <img src="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExOW5pbmtxczE2OHExN2c2MXo0aHFlcmowZDZkZXBjOXBhY2I3NnVzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Z5xNsrWg4867KqnIjh/giphy.gif" 
+                             alt="Logo" class="relative w-12 h-12 object-contain rounded-lg border border-white/10 bg-black/50">
+                    </div>
+                    <h1 class="text-2xl font-bold bg-gradient-to-r from-cyan-300 to-indigo-400 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
+                        TEKNO MAIL
+                    </h1>
+                </div>
+
+                <!-- Dynamic Account Content -->
+                <div id="account-section">
+                    <!-- Content injected via JS -->
+                </div>
+            </div>
+
+            <!-- Inbox List Header -->
+            <div class="p-4 flex items-center justify-between sticky top-0 bg-slate-900/80 backdrop-blur-xl z-20 border-b border-white/10">
+                <h2 class="text-sm font-bold text-cyan-100 flex items-center gap-2 uppercase tracking-wide">
+                    <i data-lucide="inbox" class="w-4 h-4 text-cyan-400"></i>
+                    Inbox
+                    <span id="msg-count" class="hidden bg-cyan-600 text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-[0_0_10px_rgba(8,145,178,0.5)]">0</span>
+                </h2>
+                <div class="flex items-center gap-2">
+                    <button onclick="toggleAutoRefresh()" id="btn-autorefresh" class="p-1.5 rounded-lg transition-all border border-green-500/30 text-green-400 bg-green-900/30" title="Auto Sync">
+                        <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]"></div>
+                    </button>
+                    <button onclick="fetchMessages(false)" id="btn-refresh" class="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-cyan-300 transition-colors border border-transparent hover:border-white/10">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Inbox List Container -->
+            <div id="inbox-list" class="flex-1 overflow-y-auto custom-scrollbar">
+                <!-- Messages injected via JS -->
+            </div>
+        </div>
+
+        <!-- MAIN MESSAGE VIEW -->
+        <div class="flex-1 relative z-10 flex flex-col h-[50vh] md:h-screen backdrop-blur-sm bg-slate-900/40">
+            <div id="message-view-container" class="flex-1 flex flex-col h-full overflow-hidden">
+                <!-- Message content injected via JS -->
+            </div>
+        </div>
+
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- CONSTANTS & STATE ---
+        const API_BASE = "https://api.mail.tm";
+        
+        let state = {
+            account: null,
+            token: null,
+            messages: [],
+            domains: [], // Added domains list
+            savedAccounts: [], // New: List of saved accounts
+            selectedMessage: null,
+            isLoading: false,
+            isRefreshing: false,
+            error: null,
+            autoRefresh: true,
+            refreshInterval: null,
+            authMode: 'create' // 'create' | 'login'
+        };
+
+        // --- HELPER FUNCTIONS ---
+        const generateRandomString = (length) => {
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        };
+
+        const copyToClipboard = (text) => {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            alert("Disalin ke clipboard: " + text);
+        };
+
+        // Fill inputs with random data for quick creation
+        const fillRandomData = () => {
+            const userInput = document.getElementById('reg-username');
+            const passInput = document.getElementById('reg-password');
+            if (userInput && passInput) {
+                userInput.value = generateRandomString(10);
+                passInput.value = generateRandomString(12);
+            }
+        };
+
+        // --- ACCOUNT VAULT FUNCTIONS (New) ---
+
+        function toggleSaveAccount() {
+            if (!state.account) return;
+
+            const index = state.savedAccounts.findIndex(a => a.address === state.account.address);
+            let newSaved = [...state.savedAccounts];
+
+            if (index >= 0) {
+                // Remove
+                newSaved.splice(index, 1);
+            } else {
+                // Add
+                newSaved.push(state.account);
+            }
+
+            state.savedAccounts = newSaved;
+            localStorage.setItem('tm_saved_accounts', JSON.stringify(newSaved));
+            renderAccountSection();
+        }
+
+        function deleteSavedAccount(address, event) {
+            if(event) event.stopPropagation();
+            const newSaved = state.savedAccounts.filter(a => a.address !== address);
+            state.savedAccounts = newSaved;
+            localStorage.setItem('tm_saved_accounts', JSON.stringify(newSaved));
+            renderAccountSection();
+        }
+
+        function loginSavedAccount(address) {
+            const acc = state.savedAccounts.find(a => a.address === address);
+            if (acc) {
+                executeLogin(acc.address, acc.password);
+            }
+        }
+
+        // --- API FUNCTIONS ---
+
+        async function fetchDomains() {
+            try {
+                const res = await fetch(`${API_BASE}/domains`);
+                if (res.ok) {
+                    const data = await res.json();
+                    updateState({ domains: data['hydra:member'] || [] });
+                    // If we are on create screen, re-render to populate dropdown
+                    if (state.authMode === 'create' && !state.account) {
+                        renderAccountSection();
+                    }
+                }
+            } catch (e) {
+                console.error("Gagal mengambil domain", e);
+            }
+        }
+
+        function toggleAuthMode() {
+            updateState({ 
+                authMode: state.authMode === 'create' ? 'login' : 'create',
+                error: null 
+            });
+            render();
+            
+            // If switching to create mode, ensure domains are loaded and try to pre-fill random
+            if (state.authMode === 'create') {
+                if (state.domains.length === 0) fetchDomains();
+                // Delay slightly to ensure DOM is ready
+                setTimeout(fillRandomData, 100);
+            }
+        }
+
+        async function loginAccount() {
+            const emailInput = document.getElementById('login-email');
+            const passwordInput = document.getElementById('login-password');
+            const address = emailInput ? emailInput.value.trim() : '';
+            const password = passwordInput ? passwordInput.value.trim() : '';
+
+            if (!address || !password) {
+                updateState({ error: "Email dan password harus diisi." });
+                renderAccountSection(); // Re-render to show error
+                return;
+            }
+
+            executeLogin(address, password);
+        }
+
+        async function createCustomAccount() {
+            const usernameInput = document.getElementById('reg-username');
+            const domainSelect = document.getElementById('reg-domain');
+            const passwordInput = document.getElementById('reg-password');
+
+            const username = usernameInput ? usernameInput.value.trim() : '';
+            const domain = domainSelect ? domainSelect.value : '';
+            const password = passwordInput ? passwordInput.value.trim() : '';
+
+            if (!username || !domain || !password) {
+                updateState({ error: "Mohon lengkapi username, domain, dan password." });
+                renderAccountSection();
+                return;
+            }
+
+            const address = `${username}@${domain}`;
+
+            updateState({ isLoading: true, error: null });
+            renderAccountSection();
+
+            try {
+                // 1. Create Account
+                const accountRes = await fetch(`${API_BASE}/accounts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address, password })
+                });
+
+                if (!accountRes.ok) {
+                    const errData = await accountRes.json();
+                    throw new Error(errData['hydra:description'] || "Gagal membuat akun. Username mungkin sudah dipakai.");
+                }
+
+                const accountData = await accountRes.json();
+
+                // 2. Login directly
+                await executeLogin(address, password);
+
+            } catch (err) {
+                updateState({ error: err.message, isLoading: false });
+                renderAccountSection();
+            }
+        }
+
+        async function executeLogin(address, password) {
+            updateState({ isLoading: true, error: null });
+            renderAccountSection();
+
+            try {
+                // Get Token
+                const tokenRes = await fetch(`${API_BASE}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address, password })
+                });
+
+                if (!tokenRes.ok) throw new Error("Autentikasi gagal. Cek kembali email/password.");
+                const tokenData = await tokenRes.json();
+
+                // Get Account Details
+                const meRes = await fetch(`${API_BASE}/me`, {
+                    headers: { 'Authorization': `Bearer ${tokenData.token}` }
+                });
+
+                if (!meRes.ok) throw new Error("Gagal mengambil data akun.");
+                const accountData = await meRes.json();
+
+                const newAccount = { ...accountData, password };
+                
+                localStorage.setItem('tm_account', JSON.stringify(newAccount));
+                localStorage.setItem('tm_token', tokenData.token);
+
+                // Check if this account is already saved/locked, if so update the object
+                const savedIdx = state.savedAccounts.findIndex(a => a.address === newAccount.address);
+                if (savedIdx >= 0) {
+                    const newSaved = [...state.savedAccounts];
+                    newSaved[savedIdx] = newAccount;
+                    state.savedAccounts = newSaved;
+                    localStorage.setItem('tm_saved_accounts', JSON.stringify(newSaved));
+                }
+
+                updateState({ 
+                    account: newAccount, 
+                    token: tokenData.token,
+                    isLoading: false 
+                });
+                
+                startAutoRefresh();
+                render(); // Full render on success
+
+            } catch (err) {
+                updateState({ error: err.message, isLoading: false });
+                renderAccountSection();
+            }
+        }
+
+        async function fetchMessages(isAuto = false) {
+            if (!state.token) return;
+            
+            if (!isAuto) {
+                updateState({ isRefreshing: true });
+                renderRefreshButton();
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/messages`, {
+                    headers: { 'Authorization': `Bearer ${state.token}` }
+                });
+                
+                if (res.status === 401) {
+                    logout();
+                    return;
+                }
+
+                const data = await res.json();
+                updateState({ messages: data['hydra:member'] || [] });
+                
+                if (!isAuto) updateState({ isRefreshing: false });
+                
+                renderInbox();
+                renderRefreshButton();
+
+            } catch (err) {
+                console.error("Error fetching messages:", err);
+                if (!isAuto) {
+                    updateState({ isRefreshing: false });
+                    renderRefreshButton();
+                }
+            }
+        }
+
+        async function readMessage(msgId) {
+            if (!state.token) return;
+            
+            const tempSelected = state.messages.find(m => m.id === msgId);
+            updateState({ selectedMessage: tempSelected });
+            renderInbox();
+            renderMessageView(true);
+
+            try {
+                const res = await fetch(`${API_BASE}/messages/${msgId}`, {
+                    headers: { 'Authorization': `Bearer ${state.token}` }
+                });
+                const data = await res.json();
+                
+                const updatedMessages = state.messages.map(m => 
+                    m.id === msgId ? { ...m, seen: true } : m
+                );
+
+                updateState({ 
+                    selectedMessage: data,
+                    messages: updatedMessages
+                });
+
+                renderInbox();
+                renderMessageView(false);
+
+            } catch (err) {
+                console.error("Gagal membuka pesan", err);
+                alert("Gagal membuka pesan.");
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('tm_account');
+            localStorage.removeItem('tm_token');
+            stopAutoRefresh();
+            updateState({
+                account: null,
+                token: null,
+                messages: [],
+                selectedMessage: null
+            });
+            render();
+            
+            // After logout, try to fetch domains again to ensure dropdown is ready if they want to register again
+            fetchDomains();
+            setTimeout(fillRandomData, 100);
+        }
+
+        // --- STATE MANAGEMENT HELPERS ---
+        
+        function updateState(newState) {
+            state = { ...state, ...newState };
+        }
+
+        function startAutoRefresh() {
+            if (state.refreshInterval) clearInterval(state.refreshInterval);
+            if (state.autoRefresh && state.token) {
+                fetchMessages(true);
+                state.refreshInterval = setInterval(() => fetchMessages(true), 10000);
+            }
+        }
+
+        function stopAutoRefresh() {
+            if (state.refreshInterval) clearInterval(state.refreshInterval);
+        }
+
+        function toggleAutoRefresh() {
+            updateState({ autoRefresh: !state.autoRefresh });
+            if (state.autoRefresh) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+            renderHeaderControls();
+        }
+
+        // --- RENDER FUNCTIONS (UI) ---
+
+        function render() {
+            renderAccountSection();
+            renderInbox();
+            renderMessageView();
+            renderHeaderControls();
+            lucide.createIcons();
+        }
+
+        function renderHeaderControls() {
+            const btnAuto = document.getElementById('btn-autorefresh');
+            const isActive = state.autoRefresh;
+            
+            btnAuto.className = `p-1.5 rounded-lg transition-all border ${isActive ? 'text-green-400 bg-green-900/30 border-green-500/30' : 'text-slate-500 border-transparent hover:bg-white/5'}`;
+            btnAuto.innerHTML = `<div class="w-2 h-2 rounded-full ${isActive ? 'bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]' : 'bg-slate-600'}"></div>`;
+            
+            // Message Count
+            const countBadge = document.getElementById('msg-count');
+            if(state.messages.length > 0) {
+                countBadge.classList.remove('hidden');
+                countBadge.innerText = state.messages.length;
+            } else {
+                countBadge.classList.add('hidden');
+            }
+        }
+
+        function renderRefreshButton() {
+            const btn = document.getElementById('btn-refresh');
+            const iconClass = state.isRefreshing ? 'animate-spin' : '';
+            btn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4 ${iconClass}"></i>`;
+            lucide.createIcons();
+        }
+
+        function renderAccountSection() {
+            const container = document.getElementById('account-section');
+            
+            // Render Saved Accounts List (Shared Component)
+            // Helper untuk list akun yang disimpan (sekarang dijadikan string HTML langsung di bawah agar lebih fleksibel)
+            
+            if (!state.account) {
+                // Not Logged In View
+                if (state.authMode === 'login') {
+                    // --- LOGIN FORM ---
+                    container.innerHTML = `
+                        <div class="text-center py-4 animate-in fade-in slide-in-from-left-4 duration-300">
+                            <h3 class="text-cyan-100 text-sm font-bold mb-4 uppercase tracking-wider">Login Akun</h3>
+                            
+                            <div class="space-y-3 mb-4">
+                                <input type="email" id="login-email" placeholder="Email Address" 
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all placeholder:text-slate-500 font-mono">
+                                <input type="password" id="login-password" placeholder="Password" 
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all placeholder:text-slate-500 font-mono">
+                            </div>
+
+                            <button onclick="loginAccount()" ${state.isLoading ? 'disabled' : ''}
+                                class="w-full py-2.5 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold tracking-wide transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/30 ${state.isLoading ? 'opacity-70 cursor-not-allowed' : ''}">
+                                ${state.isLoading ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>' : '<i data-lucide="log-in" class="w-4 h-4"></i>'}
+                                MASUK
+                            </button>
+
+                            <button onclick="toggleAuthMode()" class="mt-4 text-xs text-slate-400 hover:text-cyan-300 underline underline-offset-2 transition-colors">
+                                Belum punya akun? Buat baru
+                            </button>
+
+                            ${state.error ? `
+                            <div class="mt-4 p-3 bg-red-500/20 border border-red-500/30 backdrop-blur-md rounded-lg flex items-start gap-2 text-left">
+                                <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-0.5 shrink-0"></i>
+                                <p class="text-xs text-red-200">${state.error}</p>
+                            </div>` : ''}
+
+                            <!-- Simple list for login screen -->
+                            ${state.savedAccounts.length > 0 ? `
+                                <div class="mt-6 pt-4 border-t border-white/10">
+                                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center justify-center gap-2">
+                                        <i data-lucide="history" class="w-3 h-3"></i> Riwayat
+                                    </h4>
+                                    <div class="space-y-1">
+                                        ${state.savedAccounts.map(acc => `
+                                            <button onclick="loginSavedAccount('${acc.address}')" class="w-full flex items-center justify-between p-2 rounded hover:bg-white/5 text-xs text-slate-400 hover:text-cyan-300 transition-colors font-mono">
+                                                <span class="truncate">${acc.address}</span>
+                                                <i data-lucide="chevron-right" class="w-3 h-3 opacity-50"></i>
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    // --- CREATE FORM (Custom & Random) ---
+                    const domainOptions = state.domains.length > 0 
+                        ? state.domains.map(d => `<option value="${d.domain}">@${d.domain}</option>`).join('')
+                        : '<option disabled>Loading domains...</option>';
+
+                    container.innerHTML = `
+                        <div class="text-center py-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-cyan-100 text-sm font-bold uppercase tracking-wider">Buat Akun Baru</h3>
+                                <button onclick="fillRandomData()" title="Isi data acak" class="p-1.5 bg-white/5 hover:bg-white/10 rounded-md text-cyan-400 transition-colors">
+                                    <i data-lucide="dices" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+
+                            <div class="space-y-3 mb-4">
+                                <div class="flex gap-2">
+                                    <input type="text" id="reg-username" placeholder="User" 
+                                        class="w-full min-w-0 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all placeholder:text-slate-500 font-mono">
+                                </div>
+                                
+                                <select id="reg-domain" class="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500/50 transition-all font-mono appearance-none">
+                                    ${domainOptions}
+                                </select>
+                                
+                                <input type="password" id="reg-password" placeholder="Password" 
+                                    class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all placeholder:text-slate-500 font-mono">
+                            </div>
+
+                            <button onclick="createCustomAccount()" ${state.isLoading ? 'disabled' : ''}
+                                class="w-full py-2.5 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold tracking-wide transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.5)] border border-cyan-400/30 ${state.isLoading ? 'opacity-70 cursor-not-allowed' : ''}">
+                                ${state.isLoading ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>' : '<i data-lucide="zap" class="w-4 h-4 fill-current"></i>'}
+                                BUAT AKUN
+                            </button>
+                            
+                            <button onclick="toggleAuthMode()" class="mt-4 text-xs text-slate-400 hover:text-cyan-300 underline underline-offset-2 transition-colors">
+                                Sudah punya akun? Login manual
+                            </button>
+
+                            ${state.error ? `
+                            <div class="mt-4 p-3 bg-red-500/20 border border-red-500/30 backdrop-blur-md rounded-lg flex items-start gap-2 text-left">
+                                <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-0.5 shrink-0"></i>
+                                <p class="text-xs text-red-200">${state.error}</p>
+                            </div>` : ''}
+                        </div>
+                    `;
+                }
+            } else {
+                // --- LOGGED IN VIEW (MINIMALIST) ---
+                const isSaved = state.savedAccounts.some(a => a.address === state.account.address);
+                const savedCount = state.savedAccounts.length;
+                const avatarChar = state.account.address[0].toUpperCase();
+                
+                container.innerHTML = `
+                    <div class="animate-in fade-in slide-in-from-left-4 duration-500">
+                        
+                        <!-- Main Account Card -->
+                        <div class="bg-gradient-to-br from-white/10 to-white/5 rounded-xl p-3 border border-white/10 shadow-lg relative group">
+                            
+                            <!-- Header: Avatar & Email -->
+                            <div class="flex items-center gap-3 mb-3">
+                                <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-inner border border-white/20">
+                                    ${avatarChar}
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active ID</h3>
+                                        <button onclick="copyToClipboard('${state.account.address}')" class="text-slate-500 hover:text-cyan-300 transition-colors" title="Copy Email">
+                                            <i data-lucide="copy" class="w-3 h-3"></i>
+                                        </button>
+                                    </div>
+                                    <p class="text-sm font-mono text-cyan-50 truncate" title="${state.account.address}">${state.account.address}</p>
+                                </div>
+                            </div>
+
+                            <!-- Action Row (Minimalist Buttons) -->
+                            <div class="grid grid-cols-3 gap-2">
+                                <button onclick="copyToClipboard('${state.account.password || ''}')" 
+                                    class="col-span-1 py-1.5 bg-black/20 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-200 border border-white/5 hover:border-cyan-500/30 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-1.5" title="Copy Password">
+                                    <i data-lucide="key" class="w-3 h-3"></i>
+                                    Pass
+                                </button>
+                                
+                                <button onclick="toggleSaveAccount()" 
+                                    class="col-span-1 py-1.5 ${isSaved ? 'bg-green-500/20 text-green-300 border-green-500/30' : 'bg-black/20 text-slate-300 border-white/5 hover:bg-white/10'} border rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-1.5" title="${isSaved ? 'Akun Tersimpan' : 'Simpan ke Vault'}">
+                                    <i data-lucide="${isSaved ? 'lock' : 'unlock'}" class="w-3 h-3"></i>
+                                    ${isSaved ? 'Saved' : 'Save'}
+                                </button>
+                                
+                                <button onclick="logout()" 
+                                    class="col-span-1 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 border border-red-500/20 hover:border-red-500/40 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-1.5" title="Logout">
+                                    <i data-lucide="log-out" class="w-3 h-3"></i>
+                                    Out
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Collapsible Saved Accounts (Vault) -->
+                        <div class="mt-3">
+                            <button onclick="document.getElementById('vault-list').classList.toggle('hidden'); this.querySelector('.chevron').classList.toggle('rotate-180')" 
+                                class="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-widest hover:text-cyan-400 transition-colors py-2 px-1 group">
+                                <span class="flex items-center gap-1.5">
+                                    <i data-lucide="shield" class="w-3 h-3 group-hover:text-cyan-400 transition-colors"></i> 
+                                    Account Vault (${savedCount})
+                                </span>
+                                <i data-lucide="chevron-down" class="w-3 h-3 transition-transform duration-300 chevron"></i>
+                            </button>
+                            
+                            <div id="vault-list" class="hidden space-y-1.5 mt-1 animate-in slide-in-from-top-2 fade-in duration-200">
+                                ${state.savedAccounts.length === 0 ? 
+                                    `<div class="text-center py-2 text-xs text-slate-600 italic border border-dashed border-white/5 rounded-lg">Vault kosong</div>` : ''}
+                                
+                                ${state.savedAccounts.map(acc => `
+                                    <div class="group flex items-center justify-between p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-transparent hover:border-cyan-500/20 transition-all cursor-pointer relative"
+                                         onclick="loginSavedAccount('${acc.address}')">
+                                        
+                                        <!-- Active Indicator Strip -->
+                                        ${state.account.address === acc.address ? '<div class="absolute left-0 top-2 bottom-2 w-0.5 bg-green-400 rounded-r shadow-[0_0_5px_rgba(74,222,128,0.8)]"></div>' : ''}
+                                        
+                                        <div class="flex items-center gap-2 overflow-hidden pl-1">
+                                            <div class="w-1.5 h-1.5 rounded-full shrink-0 ${state.account.address === acc.address ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}"></div>
+                                            <span class="text-xs font-mono text-slate-400 truncate w-32 group-hover:text-cyan-100 transition-colors">${acc.address}</span>
+                                        </div>
+                                        <button onclick="deleteSavedAccount('${acc.address}', event)" class="p-1 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors" title="Hapus dari Vault">
+                                            <i data-lucide="x" class="w-3 h-3"></i>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderInbox() {
+            const container = document.getElementById('inbox-list');
+            
+            if (!state.token) {
+                container.innerHTML = `<div class="p-8 text-center text-slate-500 text-sm">Menunggu inisialisasi identitas...</div>`;
+                return;
+            }
+
+            if (state.messages.length === 0) {
+                container.innerHTML = `
+                    <div class="p-8 text-center flex flex-col items-center">
+                        <div class="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-3 border border-white/10">
+                            <i data-lucide="inbox" class="w-8 h-8 text-slate-500/50"></i>
+                        </div>
+                        <p class="text-slate-400 text-sm">Belum ada pesan masuk.</p>
+                        <p class="text-slate-600 text-xs mt-1 font-mono">Inbox akan refresh otomatis.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            let html = '<ul class="divide-y divide-white/5">';
+            state.messages.forEach(msg => {
+                const isSelected = state.selectedMessage && state.selectedMessage.id === msg.id;
+                const activeClass = isSelected ? 'bg-cyan-900/20 border-cyan-400 backdrop-blur-sm' : 'border-transparent hover:border-white/20';
+                const fromName = msg.from.name || msg.from.address;
+                const time = new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const unreadDot = !msg.seen ? '<div class="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_8px_rgba(34,211,238,0.8)] animate-pulse"></div>' : '';
+                const subject = msg.subject || "(Encrypted Subject)";
+                const intro = msg.intro || "Downloading packets...";
+
+                html += `
+                    <li>
+                        <button onclick="readMessage('${msg.id}')" 
+                            class="w-full text-left p-4 hover:bg-white/5 transition-all group relative border-l-2 ${activeClass}">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="text-sm font-bold truncate pr-2 ${msg.seen ? 'text-slate-400' : 'text-cyan-100 drop-shadow-[0_0_3px_rgba(34,211,238,0.8)]'}">
+                                    ${fromName}
+                                </span>
+                                <span class="text-[10px] text-slate-500 font-mono whitespace-nowrap">${time}</span>
+                            </div>
+                            <div class="text-xs text-slate-300 font-medium truncate mb-1">${subject}</div>
+                            <div class="text-xs text-slate-500 truncate font-mono">${intro}</div>
+                            ${unreadDot}
+                        </button>
+                    </li>
+                `;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function renderMessageView(loading = false) {
+            const container = document.getElementById('message-view-container');
+
+            if (!state.selectedMessage) {
+                container.innerHTML = `
+                    <div class="flex-1 flex flex-col items-center justify-center text-slate-600 p-8 select-none">
+                        <div class="relative mb-6">
+                            <div class="absolute -inset-4 bg-cyan-500/20 rounded-full blur-xl animate-pulse"></div>
+                            <i data-lucide="mail" class="w-20 h-20 text-cyan-900/50 relative z-10"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-400 uppercase tracking-widest">Menunggu Transmisi</h3>
+                        <p class="text-sm text-slate-500 max-w-xs text-center mt-2 font-mono">
+                            Pilih pesan dari panel data stream di sebelah kiri untuk mendekripsi konten.
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            const msg = state.selectedMessage;
+            const fromInitial = (msg.from.name || msg.from.address)[0].toUpperCase();
+            
+            // Check if we have the full details (html/text content) or just the list item
+            const hasContent = msg.html || msg.text;
+            
+            let contentBody = '';
+            if (loading) {
+                contentBody = `<div class="flex items-center justify-center h-full text-cyan-400"><i data-lucide="loader-2" class="animate-spin w-8 h-8"></i></div>`;
+            } else if (hasContent) {
+                const bodyContent = msg.html ? msg.html[0] : `<pre class="whitespace-pre-wrap font-sans text-slate-800 text-sm">${msg.text}</pre>`;
+                
+                // Attachments
+                let attachmentsHtml = '';
+                if (msg.attachments && msg.attachments.length > 0) {
+                    attachmentsHtml = `
+                        <div class="mt-8 pt-6 border-t border-slate-300/50">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                <i data-lucide="paperclip" class="w-3 h-3"></i> Attached Data
+                            </h4>
+                            <div class="flex flex-wrap gap-2">
+                                ${msg.attachments.map(att => `
+                                    <a href="${API_BASE}${att.downloadUrl}?token=${state.token}" target="_blank"
+                                       class="flex items-center gap-2 bg-slate-100 hover:bg-cyan-50 text-slate-700 hover:text-cyan-700 px-4 py-3 rounded-lg text-sm transition-colors border border-slate-200 hover:border-cyan-300 shadow-sm">
+                                        <span class="font-medium">${att.filename}</span>
+                                        <span class="text-xs text-slate-400">(${(att.size / 1024).toFixed(1)} KB)</span>
+                                        <i data-lucide="external-link" class="w-3 h-3"></i>
+                                    </a>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                contentBody = `
+                    <div class="prose prose-sm max-w-none text-slate-800 overflow-x-hidden">
+                        ${msg.html ? bodyContent : ''} <!-- If HTML, inject directly. Warning: XSS risk in production if not sanitized -->
+                        ${!msg.html ? bodyContent : ''} <!-- If Text, injected in pre tag above -->
+                    </div>
+                    ${attachmentsHtml}
+                `;
+            } else {
+                contentBody = `<div class="flex items-center justify-center h-full text-slate-400">Loading content...</div>`;
+            }
+
+            container.innerHTML = `
+                <!-- Message Header -->
+                <div class="p-6 border-b border-white/10 bg-slate-900/80 backdrop-blur-xl shadow-lg z-20">
+                    <div class="flex justify-between items-start mb-4">
+                        <h2 class="text-2xl font-bold text-white leading-snug drop-shadow-md">${msg.subject}</h2>
+                        <div class="flex gap-2">
+                            <span class="bg-white/5 text-cyan-300 font-mono text-xs px-2 py-1 rounded border border-white/10">
+                                ${new Date(msg.createdAt).toLocaleString()}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-700 flex items-center justify-center text-white font-bold text-xl shadow-lg border border-white/20">
+                            ${fromInitial}
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-cyan-50 text-lg">${msg.from.name || msg.from.address}</span>
+                                <span class="text-xs text-slate-400 font-mono bg-black/30 px-2 py-0.5 rounded">&lt;${msg.from.address}&gt;</span>
+                            </div>
+                            <div class="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                                To: <span class="text-cyan-200">${state.account.address}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message Body -->
+                <div class="flex-1 overflow-y-auto bg-white/90 backdrop-blur-md p-8 shadow-[inset_0_0_50px_rgba(0,0,0,0.1)]">
+                    <div class="bg-white rounded-lg shadow-sm p-4 min-h-[50vh]">
+                        ${contentBody}
+                    </div>
+                </div>
+            `;
+            
+            lucide.createIcons();
+        }
+
+        // --- PARTICLE SYSTEM (Canvas) ---
+        function initParticles() {
+            const canvas = document.getElementById('particle-canvas');
+            const ctx = canvas.getContext('2d');
+            let particles = [];
+
+            const resizeCanvas = () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            };
+
+            const createParticles = () => {
+                const particleCount = Math.min(window.innerWidth / 10, 100);
+                particles = [];
+                for (let i = 0; i < particleCount; i++) {
+                    particles.push({
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        vx: (Math.random() - 0.5) * 1.5,
+                        vy: (Math.random() - 0.5) * 1.5,
+                        size: Math.random() * 2 + 1
+                    });
+                }
+            };
+
+            const drawParticles = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                particles.forEach((p, index) => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+
+                    if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+                    if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(100, 200, 255, 0.7)';
+                    ctx.fill();
+
+                    for (let j = index + 1; j < particles.length; j++) {
+                        const p2 = particles[j];
+                        const dx = p.x - p2.x;
+                        const dy = p.y - p2.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < 150) {
+                            ctx.beginPath();
+                            ctx.strokeStyle = `rgba(100, 200, 255, ${1 - distance / 150})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.moveTo(p.x, p.y);
+                            ctx.lineTo(p2.x, p2.y);
+                            ctx.stroke();
+                        }
+                    }
+                });
+                requestAnimationFrame(drawParticles);
+            };
+
+            window.addEventListener('resize', () => {
+                resizeCanvas();
+                createParticles();
+            });
+
+            resizeCanvas();
+            createParticles();
+            drawParticles();
+        }
+
+        // --- INIT APP ---
+        window.addEventListener('DOMContentLoaded', () => {
+            initParticles();
+            
+            // Load saved accounts
+            const savedAccounts = localStorage.getItem('tm_saved_accounts');
+            if (savedAccounts) {
+                state.savedAccounts = JSON.parse(savedAccounts);
+            }
+
+            // Load from storage
+            const savedAccount = localStorage.getItem('tm_account');
+            const savedToken = localStorage.getItem('tm_token');
+            
+            if (savedAccount && savedToken) {
+                state.account = JSON.parse(savedAccount);
+                state.token = savedToken;
+                startAutoRefresh();
+            } else {
+                // If not logged in, fetch domains immediately for the create form
+                fetchDomains();
+                // Pre-fill with random data for convenience
+                setTimeout(fillRandomData, 500);
+            }
+            
+            render();
+        });
+
+    </script>
+</body>
+</html>

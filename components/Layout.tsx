@@ -31,12 +31,9 @@ export const Layout: React.FC<LayoutProps> = ({
   };
 
   const navItems = [
-    { id: 'overview', label: 'Overview', icon: 'M4 6h16M4 12h16m-7 6h7' },
-    { id: 'addresses', label: 'Destination Addresses', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-    { id: 'rules', label: 'Routing Rules', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
-    { id: 'catchall', label: 'Catch-all Rule', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-    { id: 'subdomains', label: 'Subdomains', icon: 'M4 6h6M4 12h8M4 18h10M16 6h4M18 4v4M16 18h4' },
-    { id: 'dns', label: 'DNS Records', icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' },
+    { id: 'subdomains', label: 'Subdomain', icon: 'M4 6h6M4 12h8M4 18h10M16 6h4M18 4v4M16 18h4' },
+    { id: 'emails', label: 'Email & Forward', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+    { id: 'mailbox', label: 'Mailbox', icon: 'M4 4h16v4H4zm0 6h10v10H4zm12 0h4v10h-4z' },
   ];
 
   return (
