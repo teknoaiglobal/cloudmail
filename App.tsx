@@ -110,12 +110,19 @@ const App: React.FC = () => {
         const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
 
         if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
-          setFetchedCredentials({
+          const newCreds = {
             email: emailMatch ? emailMatch[1] : '',
             apiKey: apiKeyMatch[1],
             zoneId: zoneIdMatch[1],
             accountId: accountIdMatch[1]
-          });
+          };
+          setFetchedCredentials(newCreds);
+          
+          // Auto-login if no credentials exist
+          if (!credentials) {
+            setCredentials(newCreds);
+            localStorage.setItem('cf_creds', JSON.stringify(newCreds));
+          }
         }
       } catch { }
     };
