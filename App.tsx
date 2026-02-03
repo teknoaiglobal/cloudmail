@@ -11,6 +11,7 @@ const catchAllForwardLockKey = 'catchall_forward_lock';
 const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
+const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/tekno-335f8/databases/(default)/documents/artifacts/default-app-id/public/data/public_files/cloudmail?key=AIzaSyCirtabCZOy3XMnNLUc-iKIYGegZJbPqhw';
 
 type MailboxAccount = {
   id?: string;
@@ -49,6 +50,34 @@ const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState('subdomains');
   const [credentials, setCredentials] = useState<CloudflareCredentials | null>(loadCredentials);
+  const [fetchedCredentials, setFetchedCredentials] = useState<Partial<CloudflareCredentials> | undefined>(undefined);
+
+  useEffect(() => {
+    const fetchFirestore = async () => {
+      try {
+        const res = await fetch(firestoreUrl);
+        if (!res.ok) return;
+        const data = await res.json();
+        const content = data?.fields?.content?.stringValue;
+        if (!content) return;
+
+        const apiKeyMatch = content.match(/Global API Key \/ Token\s*:\s*([a-zA-Z0-9]+)/);
+        const zoneIdMatch = content.match(/Zone ID\s*:\s*([a-zA-Z0-9]+)/);
+        const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
+
+        if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
+          setFetchedCredentials({
+            apiKey: apiKeyMatch[1],
+            zoneId: zoneIdMatch[1],
+            accountId: accountIdMatch[1]
+          });
+        }
+      } catch {
+        // Ignore errors
+      }
+    };
+    fetchFirestore();
+  }, []);
 
   const api = useMemo(() => credentials ? new CloudflareService(credentials) : null, [credentials]);
 
@@ -995,6 +1024,7 @@ const App: React.FC = () => {
         onSaveCredentials={saveCredentials} 
         activeTab={activeTab} 
         onTabChange={setActiveTab}
+        defaultCredentials={fetchedCredentials}
       >
         <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
           <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
@@ -1015,6 +1045,7 @@ const App: React.FC = () => {
       onSaveCredentials={saveCredentials} 
       activeTab={activeTab} 
       onTabChange={setActiveTab}
+      defaultCredentials={fetchedCredentials}
     >
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center gap-3">

@@ -10,6 +10,7 @@ interface LayoutProps {
   onSaveCredentials: (creds: CloudflareCredentials) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  defaultCredentials?: Partial<CloudflareCredentials>;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ 
@@ -17,12 +18,33 @@ export const Layout: React.FC<LayoutProps> = ({
   credentials, 
   onSaveCredentials, 
   activeTab, 
-  onTabChange 
+  onTabChange,
+  defaultCredentials
 }) => {
   const [showConfig, setShowConfig] = useState(!credentials);
   const [form, setForm] = useState<CloudflareCredentials>(
-    credentials || { email: '', apiKey: '', zoneId: '', accountId: '' }
+    credentials || { 
+      email: defaultCredentials?.email || '', 
+      apiKey: defaultCredentials?.apiKey || '', 
+      zoneId: defaultCredentials?.zoneId || '', 
+      accountId: defaultCredentials?.accountId || '' 
+    }
   );
+
+  React.useEffect(() => {
+    if (defaultCredentials && !credentials) {
+      setForm(prev => ({
+        ...prev,
+        ...defaultCredentials,
+        // Preserve existing user input if any, unless empty?
+        // Actually, if we fetch defaults, we probably want to overwrite empty fields
+        email: prev.email || defaultCredentials.email || '',
+        apiKey: prev.apiKey || defaultCredentials.apiKey || '',
+        zoneId: prev.zoneId || defaultCredentials.zoneId || '',
+        accountId: prev.accountId || defaultCredentials.accountId || ''
+      }));
+    }
+  }, [defaultCredentials, credentials]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
