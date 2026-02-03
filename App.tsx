@@ -861,6 +861,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleGenerateRandomSubdomain = () => {
+    const random = Math.random().toString(36).slice(2, 8);
+    setSubdomainInput(`${random}.edu`);
+  };
+
   const handleAddSubdomain = async () => {
     if (!api || !settings) return;
     const raw = subdomainInput.trim().toLowerCase();
@@ -1076,13 +1081,27 @@ const App: React.FC = () => {
               <p className="text-sm text-slate-500">Tambahkan subdomain untuk email routing.</p>
             </div>
             <div className="flex flex-col md:flex-row gap-3 items-end">
-              <div className="flex-1">
-                <Input
-                  label="Subdomain"
-                  placeholder="support"
-                  value={subdomainInput}
-                  onChange={(e) => setSubdomainInput(e.target.value)}
-                />
+              <div className="flex-1 space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">Subdomain</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="support (atau generate auto)"
+                    value={subdomainInput}
+                    onChange={(e) => setSubdomainInput(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerateRandomSubdomain}
+                    title="Generate random .edu subdomain"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Auto
+                  </Button>
+                </div>
               </div>
               <Button
                 onClick={handleAddSubdomain}
