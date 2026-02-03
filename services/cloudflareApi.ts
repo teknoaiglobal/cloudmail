@@ -3,7 +3,10 @@ import { CloudflareCredentials, ApiResponse } from '../types';
 
 export class CloudflareService {
   private creds: CloudflareCredentials;
-  private baseUrl = import.meta.env.DEV ? '/api' : 'https://api.cloudflare.com/client/v4';
+  // Always use /api proxy to avoid CORS issues. 
+  // In dev: handled by vite.config.ts
+  // In prod (Vercel): handled by vercel.json rewrites
+  private baseUrl = '/api';
 
   constructor(creds: CloudflareCredentials) {
     this.creds = creds;
