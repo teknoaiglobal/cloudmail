@@ -21,7 +21,7 @@ export const Layout: React.FC<LayoutProps> = ({
   onTabChange,
   defaultCredentials
 }) => {
-  const [showConfig, setShowConfig] = useState(!credentials);
+  const [showConfig, setShowConfig] = useState(false);
   const [form, setForm] = useState<CloudflareCredentials>(
     credentials || { 
       email: defaultCredentials?.email || '', 
