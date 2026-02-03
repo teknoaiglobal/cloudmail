@@ -61,12 +61,14 @@ const App: React.FC = () => {
         const content = data?.fields?.content?.stringValue;
         if (!content) return;
 
+        const emailMatch = content.match(/Email\s*:\s*([^\s]+)/);
         const apiKeyMatch = content.match(/Global API Key \/ Token\s*:\s*([a-zA-Z0-9]+)/);
         const zoneIdMatch = content.match(/Zone ID\s*:\s*([a-zA-Z0-9]+)/);
         const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
 
         if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
           setFetchedCredentials({
+            email: emailMatch ? emailMatch[1] : '',
             apiKey: apiKeyMatch[1],
             zoneId: zoneIdMatch[1],
             accountId: accountIdMatch[1]
