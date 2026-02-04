@@ -64,16 +64,70 @@ const App: React.FC = () => {
   const [subdomainInput, setSubdomainInput] = useState('');
   const [subdomainLoading, setSubdomainLoading] = useState(false);
   const [useEdu, setUseEdu] = useState(false);
+  const [userFingerprint, setUserFingerprint] = useState<string | null>(null);
   
   // Cooldown State
   const [cooldownTime, setCooldownTime] = useState<string | null>(null);
 
-  // Cooldown Timer Logic
+  // Fingerprint Logic
+  useEffect(() => {
+    const generateFingerprint = async () => {
+      try {
+        // Get IP
+        const ipRes = await fetch('https://api.ipify.org?format=json');
+        const ipData = await ipRes.json();
+        const ip = ipData.ip;
+        
+        // Get minimal browser data
+        const ua = navigator.userAgent;
+        const screen = `${window.screen.width}x${window.screen.height}`;
+        
+        // Create hash
+        const msgBuffer = new TextEncoder().encode(`${ip}-${ua}-${screen}`);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        setUserFingerprint(hashHex);
+      } catch (e) {
+        console.error('Failed to generate fingerprint:', e);
+        // Fallback or ignore? For security, maybe just ignore or use local storage only if fails
+      }
+    };
+    generateFingerprint();
+  }, []);
+
+  // Cooldown Timer Logic (Merged Local + DNS)
   useEffect(() => {
     const checkCooldown = () => {
-        const lastCreated = localStorage.getItem('last_subdomain_created');
-        if (lastCreated) {
-            const diff = Date.now() - parseInt(lastCreated);
+        let lastCreatedTime = 0;
+
+        // 1. Check Local Storage
+        const localLast = localStorage.getItem('last_subdomain_created');
+        if (localLast) {
+            lastCreatedTime = parseInt(localLast);
+        }
+
+        // 2. Check DNS Records (Persistent Global Lock)
+        if (userFingerprint && zoneDnsRecords.length > 0) {
+            // Look for TXT records starting with _owner and containing our fingerprint
+            zoneDnsRecords.forEach(record => {
+                if (record.type === 'TXT' && record.name.startsWith('_owner.') && record.content) {
+                    if (record.content.includes(`created_by:${userFingerprint}`)) {
+                        const timeMatch = record.content.match(/time:(\d+)/);
+                        if (timeMatch) {
+                            const dnsTime = parseInt(timeMatch[1]);
+                            if (dnsTime > lastCreatedTime) {
+                                lastCreatedTime = dnsTime;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        if (lastCreatedTime > 0) {
+            const diff = Date.now() - lastCreatedTime;
             const eightHours = 8 * 60 * 60 * 1000;
             if (diff < eightHours) {
                 const remaining = eightHours - diff;
@@ -84,13 +138,15 @@ const App: React.FC = () => {
             } else {
                 setCooldownTime(null);
             }
+        } else {
+            setCooldownTime(null);
         }
     };
     
     checkCooldown();
     const interval = setInterval(checkCooldown, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [userFingerprint, zoneDnsRecords]);
 
   // --- Step 2: Email & Forwarding State ---
   const [selectedSubdomain, setSelectedSubdomain] = useState('');
@@ -467,6 +523,20 @@ const App: React.FC = () => {
           }
         }));
       }
+
+      // Create Hidden Lock Record (Fingerprint + Timestamp)
+      if (userFingerprint) {
+          try {
+              await api.createZoneDnsRecord({
+                  type: 'TXT',
+                  name: `_owner.${fullSubdomain}`,
+                  content: `created_by:${userFingerprint}|time:${Date.now()}`,
+                  ttl: 1
+              });
+          } catch (e) {
+              console.error('Failed to create lock record:', e);
+          }
+      }
       
       // Store creation time for 24h timer and rate limiting
       const now = Date.now();
@@ -509,6 +579,15 @@ const App: React.FC = () => {
       const recordsToDelete = zoneDnsRecords.filter(record => {
          if (!record.name || !record.type || !record.content) return false;
          
+         // Explicitly delete our custom owner record
+         // Note: record.name from API is usually full name (e.g., _owner.sub.domain.com)
+         // We should normalize or check endswith/startswith carefully
+         const normalizeName = (n: string) => n.toLowerCase().replace(/\.$/, '');
+         const targetOwner = normalizeName(`_owner.${fullSubdomain}`);
+         if (record.type === 'TXT' && normalizeName(record.name) === targetOwner) {
+             return true;
+         }
+
          // Check if this record belongs to the subdomain based on ANY requirement pattern
          return emailRoutingRecords.some(req => {
             if (record.type !== req.type) return false;
