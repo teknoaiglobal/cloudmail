@@ -64,6 +64,33 @@ const App: React.FC = () => {
   const [subdomainInput, setSubdomainInput] = useState('');
   const [subdomainLoading, setSubdomainLoading] = useState(false);
   const [useEdu, setUseEdu] = useState(false);
+  
+  // Cooldown State
+  const [cooldownTime, setCooldownTime] = useState<string | null>(null);
+
+  // Cooldown Timer Logic
+  useEffect(() => {
+    const checkCooldown = () => {
+        const lastCreated = localStorage.getItem('last_subdomain_created');
+        if (lastCreated) {
+            const diff = Date.now() - parseInt(lastCreated);
+            const eightHours = 8 * 60 * 60 * 1000;
+            if (diff < eightHours) {
+                const remaining = eightHours - diff;
+                const h = Math.floor(remaining / (1000 * 60 * 60));
+                const m = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                const s = Math.floor((remaining % (1000 * 60)) / 1000);
+                setCooldownTime(`${h} jam ${m} menit ${s} detik`);
+            } else {
+                setCooldownTime(null);
+            }
+        }
+    };
+    
+    checkCooldown();
+    const interval = setInterval(checkCooldown, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // --- Step 2: Email & Forwarding State ---
   const [selectedSubdomain, setSelectedSubdomain] = useState('');
@@ -831,6 +858,27 @@ const App: React.FC = () => {
         {/* STEP 1: SUBDOMAIN */}
         {activeTab === 'subdomains' && (
           <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            
+            {cooldownTime ? (
+               <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                  <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mb-2">
+                     <svg className="w-8 h-8 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                     </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900">Akses Dibatasi Sementara</h3>
+                  <p className="text-slate-500 max-w-md">
+                     Untuk mencegah penyalahgunaan, Anda harus menunggu <strong>8 jam</strong> setelah membuat subdomain sebelum dapat mengakses menu ini kembali.
+                  </p>
+                  <div className="bg-orange-50 px-4 py-2 rounded-lg border border-orange-100 text-orange-700 font-mono font-bold text-lg">
+                     {cooldownTime}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-4">
+                     Subdomain Anda yang sudah ada akan dihapus otomatis dalam 24 jam.
+                  </p>
+               </div>
+            ) : (
+             <>
             {/* Domain Selector (Universal) */}
             <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex flex-col md:flex-row md:items-center gap-4">
                <div className="flex-1">
@@ -932,6 +980,8 @@ const App: React.FC = () => {
             )}
 
             {/* History List moved */}
+             </>
+            )}
           </div>
         )}
 
