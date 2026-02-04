@@ -2,24 +2,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- EMBED PROTECTION SCRIPT -->
-    <script>
-        // Cek jika halaman dibuka langsung (tidak di-embed/iframe)
-        if (window.self === window.top) {
-            window.location.href = "http://hayo.teknoaiglobal.com/";
-        }
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- EMBED PROTECTION SCRIPT -->
+    <title>Cloudflare Email Routing Manager</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
     <script>
-        // Cek jika halaman dibuka langsung (tidak di-embed/iframe)
-        if (window.self === window.top) {
-            window.location.href = "http://hayo.teknoaiglobal.com/";
+        tailwind.config = {
+            theme: {
+                extend: {
+                    screens: {
+                        'xs': '475px',
+                    },
+                    spacing: {
+                        'safe': 'env(safe-area-inset-bottom)',
+                    }
+                }
+            }
         }
     </script>
-    <title>Cloudflare Email Routing Manager</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

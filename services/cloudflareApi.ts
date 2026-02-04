@@ -31,17 +31,30 @@ export class CloudflareService {
     return response.json();
   }
 
+  // Zones
+  async listZones() {
+    return this.request<any[]>(`/zones?status=active&per_page=50`);
+  }
+
   // Settings
   async getSettings() {
     return this.request<any>(`/zones/${this.creds.zoneId}/email/routing`);
   }
 
-  async enableRouting() {
-    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/enable`, { method: 'POST' });
+  async enableRouting(name?: string) {
+    const options: RequestInit = { method: 'POST' };
+    if (name) {
+      options.body = JSON.stringify({ name });
+    }
+    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/enable`, options);
   }
 
-  async disableRouting() {
-    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/disable`, { method: 'POST' });
+  async disableRouting(name?: string) {
+    const options: RequestInit = { method: 'POST' };
+    if (name) {
+      options.body = JSON.stringify({ name });
+    }
+    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/disable`, options);
   }
 
   // Addresses
@@ -63,12 +76,27 @@ export class CloudflareService {
   }
 
   // DNS
-  async getDnsSettings() {
-    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/dns`);
+  async getDnsSettings(subdomain?: string) {
+    const query = subdomain ? `?subdomain=${encodeURIComponent(subdomain)}` : '';
+    return this.request<any>(`/zones/${this.creds.zoneId}/email/routing/dns${query}`);
   }
 
   async listZoneDnsRecords() {
-    return this.request<any[]>(`/zones/${this.creds.zoneId}/dns_records?per_page=100`);
+    let page = 1;
+    let allRecords: any[] = [];
+    while (true) {
+      const res = await this.request<any[]>(`/zones/${this.creds.zoneId}/dns_records?per_page=100&page=${page}`);
+      if (res.result) {
+        allRecords = [...allRecords, ...res.result];
+      }
+      
+      const info = res.result_info;
+      if (!info || allRecords.length >= info.total_count) {
+        break;
+      }
+      page++;
+    }
+    return { result: allRecords, success: true, errors: [], messages: [] };
   }
 
   async createZoneDnsRecord(record: { type: string; name: string; content: string; ttl?: number; priority?: number }) {

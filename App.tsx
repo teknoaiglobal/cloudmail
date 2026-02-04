@@ -56,12 +56,14 @@ const App: React.FC = () => {
   const [catchAll, setCatchAll] = useState<any>(null);
   const [dnsRecords, setDnsRecords] = useState<any>(null);
   const [zoneDnsRecords, setZoneDnsRecords] = useState<ZoneDnsRecord[]>([]);
+  const [availableZones, setAvailableZones] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // --- Step 1: Subdomain State ---
   const [subdomainInput, setSubdomainInput] = useState('');
   const [subdomainLoading, setSubdomainLoading] = useState(false);
+  const [useEdu, setUseEdu] = useState(false);
 
   // --- Step 2: Email & Forwarding State ---
   const [selectedSubdomain, setSelectedSubdomain] = useState('');
@@ -70,7 +72,9 @@ const App: React.FC = () => {
   const [customForwardEmail, setCustomForwardEmail] = useState('');
   const [emailCreationLoading, setEmailCreationLoading] = useState(false);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
+  const [createdEmailsList, setCreatedEmailsList] = useState<{ email: string; createdAt: number }[]>([]);
   const [subdomainTimer, setSubdomainTimer] = useState<string>('');
+  // catchAllDestination removed
 
   // --- Step 3: Mailbox State ---
   const [mailboxMode, setMailboxMode] = useState<'login' | 'create'>('login');
@@ -93,8 +97,58 @@ const App: React.FC = () => {
   const [mailboxMessageLoading, setMailboxMessageLoading] = useState(false);
   const [mailboxError, setMailboxError] = useState<string | null>(null);
   const mailboxRefreshRef = useRef<number | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+
+  const playNotificationSound = () => {
+    try {
+      // Cool ding sound
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.6;
+      audio.play().catch(e => console.error('Audio play failed:', e));
+    } catch (e) {
+      console.error('Audio initialization failed:', e);
+    }
+  };
+
+  // Reset lastMessageIdRef when token changes (logout/login)
+  useEffect(() => {
+    if (!mailboxToken) {
+      lastMessageIdRef.current = null;
+    }
+  }, [mailboxToken]);
 
   // --- Initialization ---
+  useEffect(() => {
+    // Load created emails history
+    try {
+      const savedEmails = localStorage.getItem('created_emails_history');
+      if (savedEmails) {
+        const parsed: { email: string; createdAt: number }[] = JSON.parse(savedEmails);
+        const now = Date.now();
+        // Filter valid emails (1 hour = 3600000 ms)
+        const valid = parsed.filter(e => now - e.createdAt < 3600000);
+        setCreatedEmailsList(valid);
+        if (valid.length !== parsed.length) {
+           localStorage.setItem('created_emails_history', JSON.stringify(valid));
+        }
+      }
+    } catch {}
+
+    // Cleanup interval every minute
+    const interval = setInterval(() => {
+       setCreatedEmailsList(prev => {
+          const now = Date.now();
+          const valid = prev.filter(e => now - e.createdAt < 3600000);
+          if (valid.length !== prev.length) {
+              localStorage.setItem('created_emails_history', JSON.stringify(valid));
+          }
+          return valid;
+       });
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const fetchFirestore = async () => {
       try {
@@ -145,18 +199,20 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [s, a, r, ca, dns] = await Promise.all([
+      const [s, a, r, ca, dns, zonesRes] = await Promise.all([
         api.getSettings(),
         api.listAddresses(),
         api.listRules(),
         api.getCatchAll(),
-        api.getDnsSettings()
+        api.getDnsSettings(),
+        api.listZones()
       ]);
       setSettings(s.result);
       setAddresses(a.result);
       setRules(r.result);
       setCatchAll(ca.result);
       setDnsRecords(dns.result || dns);
+      setAvailableZones(zonesRes.result.map((z: any) => ({ id: z.id, name: z.name })));
       try {
         const zoneRecords = await api.listZoneDnsRecords();
         setZoneDnsRecords(zoneRecords.result || []);
@@ -174,6 +230,8 @@ const App: React.FC = () => {
     if (credentials) fetchData();
   }, [credentials]);
 
+  // Catch-all effect removed
+
   // --- Helper Data ---
   const emailRoutingRecords = useMemo(() => {
     const list = Array.isArray(dnsRecords) ? dnsRecords : dnsRecords ? [dnsRecords] : [];
@@ -182,7 +240,8 @@ const App: React.FC = () => {
         type: record.type,
         content: record.content || record.value,
         priority: record.priority,
-        ttl: record.ttl
+        ttl: record.ttl,
+        name: record.name
       }))
       .filter((record) => record.type && record.content);
   }, [dnsRecords]);
@@ -200,33 +259,65 @@ const App: React.FC = () => {
   const subdomainRows = useMemo(() => {
     if (!settings?.name || emailRoutingRecords.length === 0) return [];
     const domainName = settings.name.replace(/\.$/, '');
-    const matchesRequired = (record: ZoneDnsRecord) => emailRoutingRecords.some((req) => {
-      const reqPriority = req.priority ?? null;
-      const recordPriority = record.priority ?? null;
-      return req.type === record.type && req.content === record.content && (reqPriority === null || reqPriority === recordPriority);
-    });
-    const rows = new Map<string, { subdomain: string; matches: number; lastUpdate?: string }>();
+    const normalize = (s: string) => s ? s.toLowerCase().replace(/\.$/, '').replace(/^"|"$/g, '') : '';
+
+    // Filter requirements to those likely needed for subdomains
+    // API for subdomains typically returns MX and SPF, but NOT DKIM (_domainkey)
+    const effectiveRequirements = emailRoutingRecords.filter(req => !req.name.includes('_domainkey'));
+
+    // Helper to extract subdomain based on requirement pattern
+    const extractSubdomain = (recordName: string, reqName: string) => {
+        const cleanRecordName = recordName.replace(/\.$/, '');
+        const cleanReqName = reqName.replace(/\.$/, '');
+        const cleanDomainName = domainName;
+
+        if (!cleanRecordName.endsWith(cleanDomainName)) return null;
+        
+        // Get prefix relative to domain
+        const reqPrefix = cleanReqName === cleanDomainName ? '' : cleanReqName.slice(0, -(cleanDomainName.length + 1));
+        const recordPrefix = cleanRecordName === cleanDomainName ? '' : cleanRecordName.slice(0, -(cleanDomainName.length + 1));
+
+        if (reqPrefix === '') {
+            // Requirement is root-level (e.g. MX), so recordPrefix IS the subdomain
+            return recordPrefix;
+        } else {
+            // Requirement has prefix (e.g. _domainkey), record should be prefix.subdomain
+            if (recordPrefix.startsWith(reqPrefix + '.')) {
+                return recordPrefix.slice(reqPrefix.length + 1);
+            }
+        }
+        return null;
+    };
+
+    const rows = new Map<string, { subdomain: string; matchedReqs: Set<number>; lastUpdate?: string }>();
+
     zoneDnsRecords.forEach((record) => {
       if (!record.name || !record.type || !record.content) return;
-      const name = record.name.replace(/\.$/, '');
-      if (!name.endsWith(domainName)) return;
-      if (!matchesRequired(record)) return;
-      const prefix = name === domainName ? '' : name.slice(0, -(domainName.length + 1));
-      if (!prefix) return;
-      const existing = rows.get(prefix);
-      const lastUpdate = record.modified_on || record.created_on;
-      if (existing) {
-        existing.matches += 1;
-        if (lastUpdate && (!existing.lastUpdate || new Date(lastUpdate) > new Date(existing.lastUpdate))) {
-          existing.lastUpdate = lastUpdate;
-        }
-      } else {
-        rows.set(prefix, { subdomain: prefix, matches: 1, lastUpdate });
-      }
+      
+      effectiveRequirements.forEach((req, index) => {
+          if (record.type !== req.type) return;
+          if (normalize(record.content) !== normalize(req.content)) return;
+          if (req.priority !== undefined && record.priority !== req.priority) return;
+
+          const sub = extractSubdomain(record.name, req.name);
+          if (sub) {
+              const existing = rows.get(sub);
+              const lastUpdate = record.modified_on || record.created_on;
+              if (existing) {
+                  existing.matchedReqs.add(index);
+                  if (lastUpdate && (!existing.lastUpdate || new Date(lastUpdate) > new Date(existing.lastUpdate))) {
+                      existing.lastUpdate = lastUpdate;
+                  }
+              } else {
+                  rows.set(sub, { subdomain: sub, matchedReqs: new Set([index]), lastUpdate });
+              }
+          }
+      });
     });
-    const requiredCount = emailRoutingRecords.length;
+
+    const requiredCount = effectiveRequirements.length;
     return Array.from(rows.values())
-      .filter(row => row.matches >= requiredCount)
+      .filter(row => row.matchedReqs.size >= requiredCount)
       .map((row) => row.subdomain);
   }, [settings?.name, zoneDnsRecords, emailRoutingRecords]);
 
@@ -255,36 +346,110 @@ const App: React.FC = () => {
     try {
       setSubdomainLoading(true);
       const domainName = settings.name.replace(/\.$/, '');
-      const fullName = `${raw}.${domainName}`;
+      const finalSubdomain = useEdu ? `${raw}.edu` : raw;
+      const fullSubdomain = `${finalSubdomain}.${domainName}`;
+      
+      // Enable Email Routing for this subdomain explicitly
+      // This ensures the subdomain is registered in Cloudflare Email Routing dashboard
+      try {
+        await api.enableRouting(fullSubdomain);
+        // Wait a bit for propagation internally in Cloudflare
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (e) {
+        console.warn('Attempt to enable routing for subdomain failed or already enabled:', e);
+        // Continue anyway as creating DNS records might be enough or the main goal
+      }
+
+      // Fetch EXISTING records AFTER enabling routing, as Cloudflare might have created some
       const existing = await api.listZoneDnsRecords();
       const existingRecords = existing.result || [];
-      const toCreate = emailRoutingRecords.filter((req) => {
+      const normalize = (s: string) => s ? s.toLowerCase().replace(/\.$/, '').replace(/^"|"$/g, '') : '';
+
+      // Fetch SPECIFIC DNS requirements for this subdomain from Cloudflare
+      let requiredRecords: any[] = [];
+      try {
+        const reqs = await api.getDnsSettings(fullSubdomain);
+        if (reqs.result && Array.isArray(reqs.result.records)) {
+            requiredRecords = reqs.result.records;
+        } else if (reqs.result && Array.isArray(reqs.result)) {
+            // Fallback if API returns array (unlikely for subdomain query but safe to handle)
+            requiredRecords = reqs.result;
+        }
+      } catch (e) {
+          console.error('Failed to fetch subdomain specific requirements, falling back to root logic', e);
+          // Fallback to manual calculation if API fails
+          requiredRecords = emailRoutingRecords.map(req => {
+            const reqName = req.name.replace(/\.$/, '');
+            const reqPrefix = reqName === domainName ? '' : reqName.slice(0, -(domainName.length + 1));
+            const targetName = reqPrefix ? `${reqPrefix}.${finalSubdomain}.${domainName}` : `${finalSubdomain}.${domainName}`;
+            return {
+                ...req,
+                name: targetName
+            };
+          });
+      }
+
+      // If API returned no records (empty array), it might mean the subdomain is already "active" or API weirdness.
+      // But usually it returns the required records. 
+      // If it returns empty, we might fallback to root logic just in case.
+      if (requiredRecords.length === 0) {
+           requiredRecords = emailRoutingRecords.map(req => {
+            const reqName = req.name.replace(/\.$/, '');
+            const reqPrefix = reqName === domainName ? '' : reqName.slice(0, -(domainName.length + 1));
+            const targetName = reqPrefix ? `${reqPrefix}.${finalSubdomain}.${domainName}` : `${finalSubdomain}.${domainName}`;
+            return {
+                ...req,
+                name: targetName
+            };
+          });
+      }
+
+      const toCreate = requiredRecords.filter((req) => {
         return !existingRecords.some((record: ZoneDnsRecord) => {
-          const reqPriority = req.priority ?? null;
-          const recordPriority = record.priority ?? null;
-          return record.name === fullName && record.type === req.type && record.content === req.content && (reqPriority === null || reqPriority === recordPriority);
+          const recordName = record.name.replace(/\.$/, '');
+          const reqName = req.name.replace(/\.$/, '');
+          return recordName === reqName && 
+                 record.type === req.type && 
+                 normalize(record.content) === normalize(req.content);
         });
       });
+
       if (toCreate.length > 0) {
-        await Promise.all(toCreate.map((record) => {
-          return api.createZoneDnsRecord({
-            type: record.type,
-            name: fullName,
-            content: record.content,
-            ttl: record.ttl ?? 1,
-            priority: record.priority
-          });
+        await Promise.all(toCreate.map(async (req) => {
+          // Use exact values from requirement
+          const payload: any = {
+            type: req.type,
+            name: req.name,
+            content: req.content,
+            ttl: req.ttl ?? 1
+          };
+          if (req.type === 'MX' && req.priority !== undefined) {
+            payload.priority = req.priority;
+          }
+
+          try {
+            await api.createZoneDnsRecord(payload);
+          } catch (e: any) {
+            const msg = e.message || '';
+            // Ignore if managed by email routing (meaning it's already handled) or already exists
+            if (msg.includes('managed by Email Routing') || msg.includes('already exists')) {
+                console.log(`Record ${req.name} already handled/managed: ${msg}`);
+            } else {
+                console.error(`Failed to create record ${req.name}:`, e);
+            }
+          }
         }));
       }
       
       // Store creation time for 24h timer and rate limiting
       const now = Date.now();
-      localStorage.setItem(`subdomain_timer_${raw}`, now.toString());
+      localStorage.setItem(`subdomain_timer_${finalSubdomain}`, now.toString());
       localStorage.setItem('last_subdomain_created', now.toString());
       
       setSubdomainInput('');
+      setUseEdu(false);
       await refreshZoneDnsRecords();
-      setSelectedSubdomain(raw);
+      setSelectedSubdomain(finalSubdomain);
       setActiveTab('emails');
     } catch (err: any) {
       setError(err.message || 'Gagal membuat subdomain.');
@@ -292,6 +457,94 @@ const App: React.FC = () => {
       setSubdomainLoading(false);
     }
   };
+
+  const handleDeleteSubdomain = async (subdomain: string, skipConfirm = false) => {
+    if (!api || !settings) return;
+    if (!skipConfirm && !confirm(`Apakah Anda yakin ingin menghapus subdomain ${subdomain}?`)) return;
+
+    try {
+      if (!skipConfirm) setSubdomainLoading(true);
+      const domainName = settings.name.replace(/\.$/, '');
+      const fullSubdomain = `${subdomain}.${domainName}`;
+
+      // 1. Disable Email Routing for the subdomain (Crucial step)
+      try {
+        await api.disableRouting(fullSubdomain);
+        // Wait for propagation
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (e: any) {
+         console.warn(`Failed to disable routing for ${fullSubdomain} (might be already disabled):`, e);
+      }
+
+      const normalize = (s: string) => s ? s.toLowerCase().replace(/\.$/, '').replace(/^"|"$/g, '') : '';
+
+      // Find records to delete
+      const recordsToDelete = zoneDnsRecords.filter(record => {
+         if (!record.name || !record.type || !record.content) return false;
+         
+         // Check if this record belongs to the subdomain based on ANY requirement pattern
+         return emailRoutingRecords.some(req => {
+            if (record.type !== req.type) return false;
+            if (normalize(record.content) !== normalize(req.content)) return false;
+            
+            const reqName = req.name.replace(/\.$/, '');
+            const reqPrefix = reqName === domainName ? '' : reqName.slice(0, -(domainName.length + 1));
+            const targetName = reqPrefix ? `${reqPrefix}.${subdomain}.${domainName}` : `${subdomain}.${domainName}`;
+            
+            return record.name.replace(/\.$/, '') === targetName;
+         });
+      });
+
+      if (recordsToDelete.length > 0) {
+        await Promise.all(recordsToDelete.map(record => api.deleteZoneDnsRecord(record.id)));
+      }
+      
+      // Remove timer
+      localStorage.removeItem(`subdomain_timer_${subdomain}`);
+
+      await refreshZoneDnsRecords();
+      if (selectedSubdomain === subdomain) {
+          setSelectedSubdomain('');
+      }
+    } catch (err: any) {
+      if (!skipConfirm) setError(err.message || 'Gagal menghapus subdomain.');
+      console.error('Delete subdomain error:', err);
+    } finally {
+      if (!skipConfirm) setSubdomainLoading(false);
+    }
+  };
+
+  // Auto-delete effect
+  const handleDeleteRef = useRef(handleDeleteSubdomain);
+  useEffect(() => { handleDeleteRef.current = handleDeleteSubdomain; }, [handleDeleteSubdomain]);
+
+  useEffect(() => {
+    const checkExpired = () => {
+       const now = Date.now();
+       const keys = Object.keys(localStorage);
+       keys.forEach(key => {
+          if (key.startsWith('subdomain_timer_')) {
+             const sub = key.replace('subdomain_timer_', '');
+             const createdStr = localStorage.getItem(key);
+             if (createdStr) {
+                const created = parseInt(createdStr, 10);
+                // 24 hours = 24 * 60 * 60 * 1000 = 86400000
+                if (now - created > 86400000) {
+                   console.log(`Auto-deleting expired subdomain: ${sub}`);
+                   handleDeleteRef.current(sub, true);
+                }
+             }
+          }
+       });
+    };
+    
+    // Check every minute
+    const interval = setInterval(checkExpired, 60000);
+    // Also check on mount
+    checkExpired();
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // --- Step 2 Actions ---
   // Timer Logic
@@ -362,12 +615,19 @@ const App: React.FC = () => {
 
       await fetchData();
       setCreatedEmail(email);
+      setCreatedEmailsList(prev => {
+        const updated = [{ email, createdAt: Date.now() }, ...prev];
+        localStorage.setItem('created_emails_history', JSON.stringify(updated));
+        return updated;
+      });
     } catch (err: any) {
       setError(err.message || 'Gagal membuat forwarding rule.');
     } finally {
       setEmailCreationLoading(false);
     }
   };
+
+  // handleUpdateCatchAll removed
 
   // --- Step 3 Actions ---
   // Mailbox logic
@@ -423,7 +683,19 @@ const App: React.FC = () => {
         return;
       }
       const data = await res.json();
-      setMailboxMessages(data?.['hydra:member'] || []);
+      const messages = data?.['hydra:member'] || [];
+      
+      // Check for new messages to play sound
+      if (messages.length > 0) {
+        const latestId = messages[0].id;
+        // If we have a last ID (meaning not first load) and it's different, play sound
+        if (lastMessageIdRef.current && lastMessageIdRef.current !== latestId) {
+          playNotificationSound();
+        }
+        lastMessageIdRef.current = latestId;
+      }
+      
+      setMailboxMessages(messages);
     } catch {
     } finally {
       if (!isAuto) setMailboxRefreshing(false);
@@ -471,6 +743,38 @@ const App: React.FC = () => {
       setMailboxMessageLoading(false);
     }
   };
+
+  // Auto-login to mailbox when tab is active
+  useEffect(() => {
+    if (activeTab === 'mailbox' && !mailboxToken && !mailboxLoading) {
+       handleMailboxExecuteLogin('teknomail@virgilian.com', 'teknoaiglobal');
+    }
+  }, [activeTab, mailboxToken, mailboxLoading]);
+
+  const detectedOtp = useMemo(() => {
+    if (!mailboxSelectedMessage) return null;
+    const content = mailboxSelectedMessage.html?.[0] || mailboxSelectedMessage.text || '';
+    const textContent = content.replace(/<[^>]*>/g, ' ');
+    
+    // Prioritize 6 digits (most common for OTP)
+    const match6 = textContent.match(/\b\d{6}\b/);
+    if (match6) return match6[0];
+    
+    // Fallback to 4-8 digits, excluding common years
+    const matches = textContent.match(/\b\d{4,8}\b/g);
+    if (matches) {
+      for (const m of matches) {
+        // Exclude generic years if 4 digits
+        if (m.length === 4) {
+           const val = parseInt(m);
+           if (val > 1990 && val < 2030) continue;
+        }
+        return m;
+      }
+    }
+    
+    return null;
+  }, [mailboxSelectedMessage]);
 
   // --- Render ---
   if (!credentials) {
@@ -526,7 +830,34 @@ const App: React.FC = () => {
 
         {/* STEP 1: SUBDOMAIN */}
         {activeTab === 'subdomains' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+          <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            {/* Domain Selector (Universal) */}
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex flex-col md:flex-row md:items-center gap-4">
+               <div className="flex-1">
+                 <label className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1 block">Domain Aktif</label>
+                 <select
+                    className="w-full px-3 py-2 bg-white border border-blue-200 rounded-md text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={credentials?.zoneId || ''}
+                    onChange={(e) => {
+                      if (!credentials) return;
+                      const newZoneId = e.target.value;
+                      const newCreds = { ...credentials, zoneId: newZoneId };
+                      saveCredentials(newCreds);
+                    }}
+                  >
+                    {availableZones.map(z => (
+                      <option key={z.id} value={z.id}>{z.name}</option>
+                    ))}
+                    {!availableZones.find(z => z.id === credentials?.zoneId) && credentials?.zoneId && (
+                       <option value={credentials.zoneId}>{settings?.name || credentials.zoneId}</option>
+                    )}
+                  </select>
+               </div>
+               <div className="text-xs text-blue-600 md:max-w-[50%]">
+                  Pilih domain yang ingin dikelola. Semua pengaturan di bawah (Subdomain, Email, Forwarding) akan menyesuaikan dengan domain yang dipilih.
+               </div>
+            </div>
+
             <h2 className="text-xl font-bold text-slate-900">Langkah 1: Buat Subdomain</h2>
             <div className="space-y-4">
               <div className="flex flex-col space-y-2">
@@ -538,13 +869,23 @@ const App: React.FC = () => {
                     onChange={(e) => setSubdomainInput(e.target.value)}
                     className="flex-1"
                   />
+                  <div className="flex items-center gap-2 bg-slate-50 px-3 rounded-md border border-slate-300">
+                     <input 
+                       type="checkbox" 
+                       id="useEdu" 
+                       checked={useEdu} 
+                       onChange={e => setUseEdu(e.target.checked)}
+                       className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                     />
+                     <label htmlFor="useEdu" className="text-sm font-medium text-slate-700 select-none cursor-pointer">.edu</label>
+                  </div>
                   <Button variant="outline" onClick={handleGenerateRandomSubdomain}>
                     Generate Otomatis
                   </Button>
                 </div>
                 {subdomainInput && settings?.name && (
                   <p className="text-sm text-slate-500">
-                    Preview: <span className="font-mono font-medium text-blue-600">{subdomainInput.toLowerCase()}.{settings.name}</span>
+                    Preview: <span className="font-mono font-medium text-blue-600">{subdomainInput.toLowerCase()}{useEdu ? '.edu' : ''}.{settings.name}</span>
                   </p>
                 )}
               </div>
@@ -564,28 +905,51 @@ const App: React.FC = () => {
                 <p className="text-sm font-medium text-slate-700 mb-2">Subdomain Aktif Anda:</p>
                 <div className="flex flex-wrap gap-2">
                   {subdomainRows.map(sub => (
-                    <button 
-                      key={sub}
-                      onClick={() => { setSelectedSubdomain(sub); setActiveTab('emails'); }}
-                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-full text-xs text-slate-700 transition-colors"
-                    >
-                      {sub}
-                    </button>
+                    <div key={sub} className="inline-flex items-center bg-slate-100 rounded-full border border-slate-200 overflow-hidden">
+                      <button 
+                        onClick={() => { setSelectedSubdomain(sub); setActiveTab('emails'); }}
+                        className="px-3 py-1 text-xs text-slate-700 hover:bg-slate-200 transition-colors"
+                      >
+                        {sub}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSubdomain(sub);
+                        }}
+                        className="pr-2 pl-1 py-1 text-slate-400 hover:text-red-600 hover:bg-slate-200 transition-colors border-l border-slate-200"
+                        title="Hapus Subdomain"
+                        disabled={subdomainLoading}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
+
+            {/* History List moved */}
           </div>
         )}
 
         {/* STEP 2: EMAIL & FORWARDING */}
         {activeTab === 'emails' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
-            <h2 className="text-xl font-bold text-slate-900">Langkah 2: Buat Email & Forwarding</h2>
+          <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">Langkah 2: Email & Forwarding</h2>
+              <div className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                Domain: <span className="font-semibold text-slate-700">{settings?.name}</span>
+              </div>
+            </div>
+            
+            {/* Catch-All Configuration removed */}
             
             {!createdEmail ? (
               <>
-                <div className="grid gap-6 md:grid-cols-2">
+                <div className="grid gap-4 md:gap-6 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-700">Pilih Subdomain</label>
                     <select 
@@ -621,60 +985,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Opsi Forwarding:</label>
-                  <div className="space-y-3">
-                    <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${forwardingType === 'default' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'hover:bg-slate-50'}`}
-                      onClick={() => setForwardingType('default')}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="radio" 
-                          name="forwardType" 
-                          checked={forwardingType === 'default'} 
-                          onChange={() => setForwardingType('default')}
-                          className="text-blue-600"
-                        />
-                        <span className="font-medium text-slate-900">Forward ke Mailbox Utama</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1 ml-6">
-                        Email akan diteruskan ke teknomail@virgilian.com (Inbox Aplikasi)
-                      </p>
-                    </div>
-
-                    <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${forwardingType === 'custom' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'hover:bg-slate-50'}`}
-                      onClick={() => setForwardingType('custom')}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="radio" 
-                          name="forwardType" 
-                          checked={forwardingType === 'custom'} 
-                          onChange={() => setForwardingType('custom')}
-                          className="text-blue-600"
-                        />
-                        <span className="font-medium text-slate-900">Forward ke Gmail (Untuk OTP)</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1 ml-6">
-                        Kode OTP akan dikirim ke email Gmail pribadi Anda
-                      </p>
-                      
-                      {forwardingType === 'custom' && (
-                        <div className="mt-3 ml-6 animate-in slide-in-from-top-2 fade-in">
-                          <Input
-                            placeholder="masukkan.email@gmail.com"
-                            value={customForwardEmail}
-                            onChange={(e) => setCustomForwardEmail(e.target.value)}
-                            type="email"
-                            className="bg-white"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {/* Forwarding option removed, using default */}
 
                 <Button 
                   onClick={handleCreateEmailForwarding}
@@ -742,12 +1053,48 @@ const App: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* History List */}
+            {createdEmailsList.length > 0 && (
+              <div className="pt-6 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2">
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">Riwayat Email (Aktif 1 Jam)</h3>
+                <div className="space-y-2">
+                  {createdEmailsList
+                    .filter(item => {
+                      if (!settings?.name) return false;
+                      const domain = settings.name.replace(/\.$/, '').toLowerCase();
+                      return item.email.toLowerCase().endsWith(domain);
+                    })
+                    .map((item) => (
+                    <div key={item.email} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="flex flex-col min-w-0">
+                         <code className="text-sm font-mono text-slate-700 break-all">{item.email}</code>
+                         <span className="text-xs text-slate-400">
+                           Exp: {new Date(item.createdAt + 3600000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                         </span>
+                      </div>
+                      <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => navigator.clipboard.writeText(item.email)}
+                          title="Salin Email"
+                          className="shrink-0"
+                      >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* STEP 3: MAILBOX */}
         {activeTab === 'mailbox' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+          <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-4 md:space-y-6 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-xl font-bold text-slate-900">Langkah 3: Inbox</h2>
@@ -770,73 +1117,53 @@ const App: React.FC = () => {
                         onChange={(e) => setMailboxAutoRefresh(e.target.checked)}
                         className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3 h-3"
                       />
-                      Auto Refresh
+                      <span className="hidden xs:inline">Auto Refresh</span>
                     </label>
                   </div>
                 )}
               </div>
-              {mailboxAccount && (
-                 <div className="text-xs text-slate-500">
-                   Login sebagai: <span className="font-semibold">{mailboxAccount.address}</span>
-                 </div>
-              )}
             </div>
 
             {!mailboxToken ? (
-              <div className="space-y-4 max-w-sm mx-auto text-center py-8">
-                <h3 className="font-medium text-slate-900">Login ke Mailbox Utama</h3>
-                <div className="relative">
-                  <Input
-                    placeholder="Email Mailbox"
-                    value="teknomail@virgilian.com"
-                    disabled
-                    className="bg-slate-50 text-slate-500"
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                  </div>
-                </div>
-                <div className="relative">
-                  <Input
-                    type="password"
-                    placeholder="Password"
-                    value="teknoaiglobal"
-                    disabled
-                    className="bg-slate-50 text-slate-500"
-                  />
-                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                  </div>
-                </div>
-                <Button 
-                  onClick={() => handleMailboxExecuteLogin('teknomail@virgilian.com', 'teknoaiglobal')} 
-                  isLoading={mailboxLoading} 
-                  className="w-full"
-                >
-                  Masuk ke Mailbox Utama
-                </Button>
+              <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                <p className="text-slate-500">Memuat Inbox...</p>
               </div>
             ) : (
-              <div className="flex flex-col h-[500px]">
+              <div className="flex flex-col h-[60vh] md:h-[calc(100vh-16rem)] min-h-[400px]">
                 <div className="flex-1 overflow-auto border rounded-lg border-slate-200">
                   {mailboxSelectedMessage ? (
-                    <div className="p-6 space-y-4">
+                    <div className="p-4 md:p-6 space-y-4 select-text selection:bg-blue-100 selection:text-blue-900">
                       <button 
                         onClick={() => setMailboxSelectedMessage(null)}
                         className="text-sm text-blue-600 hover:underline mb-2 flex items-center gap-1"
                       >
                         &larr; Kembali ke daftar
                       </button>
-                      <h3 className="text-xl font-bold">{mailboxSelectedMessage.subject || '(No Subject)'}</h3>
-                      <div className="text-sm text-slate-500 flex justify-between">
+                      <h3 className="text-xl font-bold select-text">{mailboxSelectedMessage.subject || '(No Subject)'}</h3>
+                      <div className="text-sm text-slate-500 flex justify-between flex-wrap gap-2 select-text">
                         <span>From: {mailboxSelectedMessage.from.address}</span>
                         <span>{new Date(mailboxSelectedMessage.createdAt).toLocaleString()}</span>
                       </div>
-                      <div className="border-t pt-4 prose prose-sm max-w-none" 
+
+                      {detectedOtp && (
+                        <div className="py-2">
+                          <Button 
+                            size="sm"
+                            className="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white flex items-center justify-center gap-2 shadow-sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(detectedOtp);
+                            }}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            Salin OTP ({detectedOtp})
+                          </Button>
+                        </div>
+                      )}
+
+                      <div className="border-t pt-4 prose prose-sm max-w-none select-text" 
                         dangerouslySetInnerHTML={{ __html: mailboxSelectedMessage.html?.[0] || mailboxSelectedMessage.text || '' }} 
                       />
                     </div>
