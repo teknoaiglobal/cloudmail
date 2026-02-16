@@ -12,6 +12,11 @@ const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
 const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/tekno-335f8/databases/(default)/documents/artifacts/default-app-id/public/data/public_files/cloudmail?key=AIzaSyCirtabCZOy3XMnNLUc-iKIYGegZJbPqhw';
+const cleanupBackupKey = 'cleanup_backup_v1';
+const cleanupAuditKey = 'cleanup_audit_v1';
+const cleanupMonitoringKey = 'cleanup_monitoring_url_v1';
+const adminPasswordKey = 'admin_cleanup_password_hash_v1';
+const adminAuthKey = 'admin_cleanup_authed_v1';
 
 type MailboxAccount = {
   id?: string;
@@ -31,6 +36,49 @@ type MailboxMessage = {
   html?: string[];
   text?: string;
   attachments?: Array<{ id: string; filename: string; size: number; downloadUrl: string }>;
+};
+
+type CleanupRecord = {
+  type: string;
+  name: string;
+  content: string;
+  ttl?: number;
+  priority?: number;
+};
+
+type CleanupRule = {
+  id?: string;
+  name: string;
+  matchers: EmailRoutingRule['matchers'];
+  actions: EmailRoutingRule['actions'];
+  enabled: boolean;
+  priority: number;
+};
+
+type CleanupBackup = {
+  createdAt: number;
+  zoneId: string;
+  zoneName?: string;
+  subdomains: string[];
+  records: CleanupRecord[];
+  rules: CleanupRule[];
+};
+
+type AuditEntry = {
+  id: string;
+  at: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  details?: any;
+};
+
+type CleanupValidation = {
+  checkedAt: string;
+  remainingCount: number;
+  remainingRecords: CleanupRecord[];
+  remainingRuleCount: number;
+  remainingRules: CleanupRule[];
+  ok: boolean;
 };
 
 const App: React.FC = () => {
@@ -59,6 +107,59 @@ const App: React.FC = () => {
   const [availableZones, setAvailableZones] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupStep, setCleanupStep] = useState<string | null>(null);
+  const [cleanupBackup, setCleanupBackup] = useState<CleanupBackup | null>(null);
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+  const [cleanupValidation, setCleanupValidation] = useState<CleanupValidation | null>(null);
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
+  const [monitoringUrl, setMonitoringUrl] = useState('');
+  const [adminAuthed, setAdminAuthed] = useState(false);
+  const [adminMode, setAdminMode] = useState<'setup' | 'login'>('login');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [adminPasswordConfirm, setAdminPasswordConfirm] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedLog = localStorage.getItem(cleanupAuditKey);
+      if (savedLog) {
+        setAuditLog(JSON.parse(savedLog));
+      }
+    } catch {}
+    try {
+      const savedBackup = localStorage.getItem(cleanupBackupKey);
+      if (savedBackup) {
+        const parsed = JSON.parse(savedBackup);
+        const normalized = {
+          ...parsed,
+          rules: Array.isArray(parsed.rules) ? parsed.rules : []
+        };
+        setCleanupBackup(normalized);
+      }
+    } catch {}
+    try {
+      const savedMonitoring = localStorage.getItem(cleanupMonitoringKey);
+      if (savedMonitoring) {
+        setMonitoringUrl(savedMonitoring);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (monitoringUrl) {
+      localStorage.setItem(cleanupMonitoringKey, monitoringUrl);
+    } else {
+      localStorage.removeItem(cleanupMonitoringKey);
+    }
+  }, [monitoringUrl]);
+
+  useEffect(() => {
+    const hash = localStorage.getItem(adminPasswordKey);
+    setAdminMode(hash ? 'login' : 'setup');
+    const authed = localStorage.getItem(adminAuthKey) === 'true';
+    setAdminAuthed(authed && !!hash);
+  }, []);
 
   // --- Step 1: Subdomain State ---
   const [subdomainInput, setSubdomainInput] = useState('');
@@ -403,6 +504,394 @@ const App: React.FC = () => {
       .filter(row => row.matchedReqs.size >= requiredCount)
       .map((row) => row.subdomain);
   }, [settings?.name, zoneDnsRecords, emailRoutingRecords]);
+
+  const normalizeName = (value: string) => value.toLowerCase().replace(/\.$/, '');
+  const normalizeContent = (value: string) => value.toLowerCase().replace(/\s+/g, '').replace(/^"|"$/g, '');
+
+  const appendAudit = (entry: Omit<AuditEntry, 'id' | 'at'>) => {
+    const nextEntry: AuditEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: new Date().toISOString(),
+      ...entry
+    };
+    setAuditLog(prev => {
+      const next = [nextEntry, ...prev].slice(0, 500);
+      localStorage.setItem(cleanupAuditKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const persistBackup = (backup: CleanupBackup) => {
+    setCleanupBackup(backup);
+    localStorage.setItem(cleanupBackupKey, JSON.stringify(backup));
+  };
+
+  const sendMonitoring = async (event: string, payload: any) => {
+    if (!monitoringUrl) return;
+    try {
+      await fetch(monitoringUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event, payload })
+      });
+      appendAudit({ level: 'info', message: 'Monitoring webhook terkirim', details: { event } });
+    } catch (err: any) {
+      appendAudit({ level: 'warn', message: 'Monitoring webhook gagal', details: { event, error: err?.message || String(err) } });
+    }
+  };
+
+  const detectEmailSubdomains = (domainName: string) => {
+    const found = new Set<string>(subdomainRows);
+    zoneDnsRecords.forEach(record => {
+      if (!record.name) return;
+      const name = normalizeName(record.name);
+      if (name.startsWith('_owner.')) {
+        const rest = name.replace('_owner.', '');
+        if (rest.endsWith(`.${domainName}`)) {
+          const sub = rest.slice(0, -(domainName.length + 1));
+          if (sub) found.add(sub);
+        }
+      }
+    });
+    return Array.from(found);
+  };
+
+  const isEmailRelatedRecord = (record: ZoneDnsRecord, domainName: string) => {
+    const name = normalizeName(record.name || '');
+    const content = normalizeContent(record.content || '');
+    const domain = normalizeName(domainName);
+    const matchesRequirement = emailRoutingRecords.some(req => {
+      const reqName = normalizeName(req.name || '');
+      const reqContent = normalizeContent(req.content || '');
+      if (record.type !== req.type) return false;
+      if (reqContent && content !== reqContent) return false;
+      if (reqName && name !== reqName) return false;
+      if (req.priority !== undefined && record.priority !== req.priority) return false;
+      return true;
+    });
+    const isMx = record.type === 'MX';
+    const isOwner = record.type === 'TXT' && name.startsWith('_owner.');
+    const isTxt = record.type === 'TXT' && (
+      content.includes('v=spf1') ||
+      content.includes('v=dkim1') ||
+      content.includes('v=dmarc1') ||
+      name.startsWith('_dmarc.') ||
+      name.includes('._domainkey.') ||
+      name.includes('._dkim.') ||
+      name.startsWith('_smtp._tls.') ||
+      name.startsWith('_mta-sts.')
+    );
+    const isA = record.type === 'A' && (
+      name === `mail.${domain}` ||
+      name === `smtp.${domain}` ||
+      name === `imap.${domain}` ||
+      name === `pop.${domain}` ||
+      name === `webmail.${domain}` ||
+      name.startsWith('mail.') ||
+      name.startsWith('smtp.') ||
+      name.startsWith('imap.') ||
+      name.startsWith('pop.') ||
+      name.startsWith('webmail.')
+    );
+    return matchesRequirement || isMx || isTxt || isA || isOwner;
+  };
+
+  const buildBackupRecords = (records: ZoneDnsRecord[]): CleanupRecord[] => {
+    return records.map(record => ({
+      type: record.type,
+      name: record.name,
+      content: record.content,
+      ttl: record.ttl,
+      priority: record.priority
+    }));
+  };
+
+  const buildBackupRules = (list: EmailRoutingRule[]): CleanupRule[] => {
+    return list.map(rule => ({
+      id: rule.id,
+      name: rule.name,
+      matchers: rule.matchers,
+      actions: rule.actions,
+      enabled: rule.enabled,
+      priority: rule.priority
+    }));
+  };
+
+  const listAllRules = async () => {
+    if (!api) return [] as EmailRoutingRule[];
+    const res = await api.listRules();
+    return (res.result || []) as EmailRoutingRule[];
+  };
+
+  const filterRulesForDomain = (list: EmailRoutingRule[], domainName: string) => {
+    const domain = domainName.toLowerCase();
+    return list.filter(rule => rule.matchers?.some(matcher => {
+      if (matcher.field !== 'to' || matcher.type !== 'literal') return false;
+      const value = (matcher.value || '').toLowerCase();
+      const emailDomain = value.split('@')[1] || '';
+      return emailDomain === domain || emailDomain.endsWith(`.${domain}`);
+    }));
+  };
+
+  const hashValue = async (value: string) => {
+    const msgBuffer = new TextEncoder().encode(value);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const handleAdminSetup = async () => {
+    setAdminAuthError(null);
+    if (!adminPasswordInput || adminPasswordInput.length < 6) {
+      setAdminAuthError('Password minimal 6 karakter.');
+      return;
+    }
+    if (adminPasswordInput !== adminPasswordConfirm) {
+      setAdminAuthError('Konfirmasi password tidak sama.');
+      return;
+    }
+    const hash = await hashValue(adminPasswordInput);
+    localStorage.setItem(adminPasswordKey, hash);
+    localStorage.setItem(adminAuthKey, 'true');
+    setAdminAuthed(true);
+    setAdminMode('login');
+    setAdminPasswordInput('');
+    setAdminPasswordConfirm('');
+  };
+
+  const handleAdminLogin = async () => {
+    setAdminAuthError(null);
+    const storedHash = localStorage.getItem(adminPasswordKey);
+    if (!storedHash) {
+      setAdminMode('setup');
+      setAdminAuthError('Password admin belum disetel.');
+      return;
+    }
+    const hash = await hashValue(adminPasswordInput);
+    if (hash !== storedHash) {
+      setAdminAuthError('Password salah.');
+      return;
+    }
+    localStorage.setItem(adminAuthKey, 'true');
+    setAdminAuthed(true);
+    setAdminPasswordInput('');
+  };
+
+  const handleAdminLogout = () => {
+    localStorage.removeItem(adminAuthKey);
+    setAdminAuthed(false);
+    setAdminPasswordInput('');
+    setAdminPasswordConfirm('');
+  };
+
+  const validateCleanup = async (domainNameOverride?: string) => {
+    if (!api || !settings) return;
+    const domainName = domainNameOverride || settings.name.replace(/\.$/, '');
+    try {
+      const res = await api.listZoneDnsRecords();
+      const records = (res.result || []) as ZoneDnsRecord[];
+      const remaining = records.filter(r => isEmailRelatedRecord(r, domainName));
+      const allRules = await listAllRules();
+      const remainingRules = filterRulesForDomain(allRules, domainName);
+      const result: CleanupValidation = {
+        checkedAt: new Date().toISOString(),
+        remainingCount: remaining.length,
+        remainingRecords: buildBackupRecords(remaining),
+        remainingRuleCount: remainingRules.length,
+        remainingRules: buildBackupRules(remainingRules),
+        ok: remaining.length === 0 && remainingRules.length === 0
+      };
+      setCleanupValidation(result);
+      appendAudit({
+        level: result.ok ? 'info' : 'warn',
+        message: result.ok ? 'Validasi bersih' : 'Validasi menemukan sisa konfigurasi',
+        details: { remainingCount: result.remainingCount, remainingRuleCount: result.remainingRuleCount }
+      });
+      await sendMonitoring('cleanup_validation', result);
+    } catch (err: any) {
+      appendAudit({ level: 'error', message: 'Validasi gagal', details: { error: err?.message || String(err) } });
+    }
+  };
+
+  const runCleanupAll = async () => {
+    if (!api || !settings || cleanupRunning) return;
+    if (!confirm('Proses ini akan menghapus semua subdomain email dan DNS mail routing. Lanjutkan?')) return;
+    setCleanupRunning(true);
+    setCleanupStep('Menyiapkan backup');
+    setCleanupNotice(null);
+    appendAudit({ level: 'info', message: 'Mulai pembersihan', details: { zoneId: credentials?.zoneId } });
+    const domainName = settings.name.replace(/\.$/, '');
+    const subdomains = detectEmailSubdomains(domainName);
+    const recordsToDelete = zoneDnsRecords.filter(r => isEmailRelatedRecord(r, domainName));
+    const allRules = await listAllRules();
+    const rulesToDelete = filterRulesForDomain(allRules, domainName);
+    const backup: CleanupBackup = {
+      createdAt: Date.now(),
+      zoneId: credentials?.zoneId || '',
+      zoneName: settings.name,
+      subdomains,
+      records: buildBackupRecords(recordsToDelete),
+      rules: buildBackupRules(rulesToDelete)
+    };
+    persistBackup(backup);
+    appendAudit({ level: 'info', message: 'Backup tersimpan', details: { recordCount: backup.records.length, subdomainCount: subdomains.length, ruleCount: backup.rules.length } });
+    setCleanupStep('Menonaktifkan routing subdomain');
+    for (const sub of subdomains) {
+      const fullSubdomain = `${sub}.${domainName}`;
+      try {
+        await api.disableRouting(fullSubdomain);
+        appendAudit({ level: 'info', message: 'Routing dinonaktifkan', details: { subdomain: fullSubdomain } });
+      } catch (err: any) {
+        appendAudit({ level: 'warn', message: 'Gagal menonaktifkan routing', details: { subdomain: fullSubdomain, error: err?.message || String(err) } });
+      }
+    }
+    setCleanupStep('Menghapus DNS record email');
+    for (const record of recordsToDelete) {
+      try {
+        await api.deleteZoneDnsRecord(record.id);
+        appendAudit({ level: 'info', message: 'DNS record dihapus', details: { name: record.name, type: record.type } });
+      } catch (err: any) {
+        appendAudit({ level: 'warn', message: 'Gagal menghapus DNS record', details: { name: record.name, type: record.type, error: err?.message || String(err) } });
+      }
+    }
+    setCleanupStep('Menghapus custom address');
+    for (const rule of rulesToDelete) {
+      try {
+        await api.deleteRule(rule.id);
+        appendAudit({ level: 'info', message: 'Custom address dihapus', details: { rule: rule.name } });
+      } catch (err: any) {
+        appendAudit({ level: 'warn', message: 'Gagal menghapus custom address', details: { rule: rule.name, error: err?.message || String(err) } });
+      }
+    }
+    setRules(allRules.filter(rule => !rulesToDelete.some(item => item.id === rule.id)));
+    await refreshZoneDnsRecords();
+    await validateCleanup(domainName);
+    setCleanupStep(null);
+    setCleanupRunning(false);
+    setCleanupNotice('Pembersihan selesai. Silakan cek hasil validasi.');
+    playNotificationSound();
+    await sendMonitoring('cleanup_finished', { zoneId: credentials?.zoneId, recordsDeleted: recordsToDelete.length, subdomains: subdomains.length, rulesDeleted: rulesToDelete.length });
+  };
+
+  const runCleanupAddressesOnly = async () => {
+    if (!api || !settings || cleanupRunning) return;
+    if (!confirm('Proses ini hanya akan menghapus custom address. Lanjutkan?')) return;
+    setCleanupRunning(true);
+    setCleanupStep('Menyiapkan backup');
+    setCleanupNotice(null);
+    appendAudit({ level: 'info', message: 'Mulai pembersihan custom address', details: { zoneId: credentials?.zoneId } });
+    const domainName = settings.name.replace(/\.$/, '');
+    const allRules = await listAllRules();
+    const rulesToDelete = filterRulesForDomain(allRules, domainName);
+    const backup: CleanupBackup = {
+      createdAt: Date.now(),
+      zoneId: credentials?.zoneId || '',
+      zoneName: settings.name,
+      subdomains: [],
+      records: [],
+      rules: buildBackupRules(rulesToDelete)
+    };
+    persistBackup(backup);
+    appendAudit({ level: 'info', message: 'Backup custom address tersimpan', details: { ruleCount: backup.rules.length } });
+    if (rulesToDelete.length === 0) {
+      setCleanupStep(null);
+      setCleanupRunning(false);
+      setCleanupNotice('Tidak ada custom address untuk dihapus.');
+      playNotificationSound();
+      await sendMonitoring('cleanup_addresses_only', { zoneId: credentials?.zoneId, rulesDeleted: 0 });
+      return;
+    }
+    setCleanupStep('Menghapus custom address');
+    for (const rule of rulesToDelete) {
+      try {
+        await api.deleteRule(rule.id);
+        appendAudit({ level: 'info', message: 'Custom address dihapus', details: { rule: rule.name } });
+      } catch (err: any) {
+        appendAudit({ level: 'warn', message: 'Gagal menghapus custom address', details: { rule: rule.name, error: err?.message || String(err) } });
+      }
+    }
+    setRules(allRules.filter(rule => !rulesToDelete.some(item => item.id === rule.id)));
+    await validateCleanup(domainName);
+    setCleanupStep(null);
+    setCleanupRunning(false);
+    setCleanupNotice('Pembersihan custom address selesai. Silakan cek hasil validasi.');
+    playNotificationSound();
+    await sendMonitoring('cleanup_addresses_only', { zoneId: credentials?.zoneId, rulesDeleted: rulesToDelete.length });
+  };
+
+  const runRollback = async () => {
+    if (!api || !settings || cleanupRunning || !cleanupBackup) return;
+    if (!confirm('Rollback akan mengembalikan konfigurasi dari backup terakhir. Lanjutkan?')) return;
+    setCleanupRunning(true);
+    setCleanupStep('Menjalankan rollback');
+    setCleanupNotice(null);
+    appendAudit({ level: 'info', message: 'Mulai rollback', details: { zoneId: cleanupBackup.zoneId } });
+    const domainName = settings.name.replace(/\.$/, '');
+    for (const sub of cleanupBackup.subdomains) {
+      const fullSubdomain = `${sub}.${domainName}`;
+      try {
+        await api.enableRouting(fullSubdomain);
+        appendAudit({ level: 'info', message: 'Routing diaktifkan', details: { subdomain: fullSubdomain } });
+      } catch (err: any) {
+        appendAudit({ level: 'warn', message: 'Gagal mengaktifkan routing', details: { subdomain: fullSubdomain, error: err?.message || String(err) } });
+      }
+    }
+    for (const record of cleanupBackup.records) {
+      try {
+        await api.createZoneDnsRecord(record);
+        appendAudit({ level: 'info', message: 'DNS record dipulihkan', details: { name: record.name, type: record.type } });
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        if (!msg.includes('already exists') && !msg.includes('managed by Email Routing')) {
+          appendAudit({ level: 'warn', message: 'Gagal memulihkan DNS record', details: { name: record.name, type: record.type, error: msg } });
+        }
+      }
+    }
+    for (const rule of cleanupBackup.rules) {
+      try {
+        await api.createRule({
+          name: rule.name,
+          matchers: rule.matchers,
+          actions: rule.actions,
+          enabled: rule.enabled,
+          priority: rule.priority
+        });
+        appendAudit({ level: 'info', message: 'Custom address dipulihkan', details: { rule: rule.name } });
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        if (!msg.includes('already exists')) {
+          appendAudit({ level: 'warn', message: 'Gagal memulihkan custom address', details: { rule: rule.name, error: msg } });
+        }
+      }
+    }
+    if (cleanupBackup.rules.length > 0) {
+      const latest = await listAllRules();
+      setRules(latest);
+    }
+    await refreshZoneDnsRecords();
+    await validateCleanup(domainName);
+    setCleanupStep(null);
+    setCleanupRunning(false);
+    setCleanupNotice('Rollback selesai. Silakan cek hasil validasi.');
+    playNotificationSound();
+    await sendMonitoring('cleanup_rollback', { zoneId: cleanupBackup.zoneId, records: cleanupBackup.records.length, subdomains: cleanupBackup.subdomains.length, rules: cleanupBackup.rules.length });
+  };
+
+  const handleDownloadBackup = () => {
+    if (!cleanupBackup) return;
+    const blob = new Blob([JSON.stringify(cleanupBackup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cleanup-backup-${cleanupBackup.zoneId}-${cleanupBackup.createdAt}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearAuditLog = () => {
+    setAuditLog([]);
+    localStorage.removeItem(cleanupAuditKey);
+  };
 
   // --- Step 1 Actions ---
   const handleGenerateRandomSubdomain = () => {
@@ -882,6 +1371,111 @@ const App: React.FC = () => {
     return null;
   }, [mailboxSelectedMessage]);
 
+  const isAdminRoute = window.location.pathname.startsWith('/admin');
+
+  const cleanupPanel = (
+    <div className="pt-6 border-t border-slate-100 space-y-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <h3 className="text-lg font-bold text-slate-900">Pembersihan Email Routing</h3>
+        {cleanupStep && (
+          <span className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1 rounded-full">
+            {cleanupStep}
+          </span>
+        )}
+      </div>
+      {cleanupNotice && (
+        <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+          {cleanupNotice}
+        </div>
+      )}
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <Input
+          label="Monitoring Webhook (Opsional)"
+          placeholder="https://monitoring.example.com/hook"
+          value={monitoringUrl}
+          onChange={(e) => setMonitoringUrl(e.target.value)}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => validateCleanup()}
+            disabled={!api || cleanupRunning}
+          >
+            Validasi
+          </Button>
+          <Button
+            variant="outline"
+            onClick={runCleanupAddressesOnly}
+            isLoading={cleanupRunning && cleanupStep === 'Menghapus custom address'}
+            disabled={!api || !settings}
+          >
+            Hapus Custom Address
+          </Button>
+          <Button
+            variant="danger"
+            onClick={runCleanupAll}
+            isLoading={cleanupRunning}
+            disabled={!api || !settings}
+          >
+            Hapus Semua
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          onClick={runRollback}
+          disabled={!cleanupBackup || cleanupRunning}
+        >
+          Rollback
+        </Button>
+        <Button
+          variant="outline"
+          onClick={handleDownloadBackup}
+          disabled={!cleanupBackup}
+        >
+          Unduh Backup
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={clearAuditLog}
+          disabled={auditLog.length === 0}
+        >
+          Bersihkan Log
+        </Button>
+      </div>
+      {cleanupBackup && (
+        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <div>Backup: {new Date(cleanupBackup.createdAt).toLocaleString('id-ID')}</div>
+          <div>{cleanupBackup.subdomains.length} subdomain, {cleanupBackup.records.length} record DNS, {cleanupBackup.rules.length} custom address</div>
+        </div>
+      )}
+      {cleanupValidation && (
+        <div className={`text-sm rounded-lg px-3 py-2 border ${cleanupValidation.ok ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 'text-amber-700 bg-amber-50 border-amber-100'}`}>
+          {cleanupValidation.ok ? 'Validasi bersih. Tidak ada konfigurasi email atau custom address tersisa.' : `Masih ada ${cleanupValidation.remainingCount} record email dan ${cleanupValidation.remainingRuleCount} custom address.`}
+        </div>
+      )}
+      <div className="border border-slate-200 rounded-lg max-h-56 overflow-auto text-xs">
+        {auditLog.length === 0 ? (
+          <div className="px-3 py-3 text-slate-500">Belum ada log aktivitas.</div>
+        ) : (
+          auditLog.slice(0, 30).map(entry => (
+            <div key={entry.id} className="px-3 py-2 border-b border-slate-100 flex items-start gap-2">
+              <span className={`mt-0.5 h-2 w-2 rounded-full ${entry.level === 'error' ? 'bg-red-500' : entry.level === 'warn' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+              <div className="flex-1">
+                <div className="text-slate-600">{new Date(entry.at).toLocaleString('id-ID')}</div>
+                <div className="text-slate-800">{entry.message}</div>
+                {entry.details && (
+                  <div className="text-slate-500">{JSON.stringify(entry.details)}</div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
   // --- Render ---
   if (!credentials) {
     return (
@@ -900,6 +1494,88 @@ const App: React.FC = () => {
     );
   }
 
+  if (isAdminRoute) {
+    return (
+      <Layout
+        credentials={credentials}
+        onSaveCredentials={saveCredentials}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        defaultCredentials={fetchedCredentials}
+      >
+        <div className="max-w-3xl mx-auto space-y-6">
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center justify-between">
+              <span>{error}</span>
+              <button onClick={() => setError(null)}>&times;</button>
+            </div>
+          )}
+          <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">Admin Pembersihan</h2>
+              {adminAuthed && (
+                <Button variant="ghost" onClick={handleAdminLogout}>
+                  Logout
+                </Button>
+              )}
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex flex-col md:flex-row md:items-center gap-4">
+              <div className="flex-1">
+                <h3 className="font-semibold text-blue-900">Domain Aktif</h3>
+                <p className="text-sm text-blue-700">Pilih zona untuk pembersihan email routing.</p>
+              </div>
+              <select 
+                className="px-3 py-2 border border-blue-200 rounded-lg bg-white text-sm min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={credentials?.zoneId || ''}
+                onChange={(e) => {
+                  const zone = availableZones.find(z => z.id === e.target.value);
+                  if (zone && credentials) {
+                    saveCredentials({ ...credentials, zoneId: zone.id });
+                  }
+                }}
+              >
+                <option value="">Pilih Domain</option>
+                {availableZones.map(z => (
+                  <option key={z.id} value={z.id}>{z.name}</option>
+                ))}
+              </select>
+            </div>
+            {!adminAuthed ? (
+              <div className="space-y-3">
+                <Input
+                  label="Password Admin"
+                  type="password"
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                />
+                {adminMode === 'setup' && (
+                  <Input
+                    label="Konfirmasi Password"
+                    type="password"
+                    value={adminPasswordConfirm}
+                    onChange={(e) => setAdminPasswordConfirm(e.target.value)}
+                  />
+                )}
+                {adminAuthError && (
+                  <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    {adminAuthError}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={adminMode === 'setup' ? handleAdminSetup : handleAdminLogin}>
+                    {adminMode === 'setup' ? 'Simpan Password' : 'Masuk'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              cleanupPanel
+            )}
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout 
       credentials={credentials} 
@@ -909,7 +1585,6 @@ const App: React.FC = () => {
       defaultCredentials={fetchedCredentials}
     >
       <div className="max-w-3xl mx-auto space-y-6">
-        {/* Progress Indicator */}
         <div className="flex items-center justify-between px-4 py-4 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className={`flex flex-col items-center ${activeTab === 'subdomains' ? 'text-blue-600' : 'text-slate-400'}`}>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 ${activeTab === 'subdomains' ? 'border-blue-600 bg-blue-50' : 'border-slate-300'}`}>1</div>
