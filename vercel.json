@@ -3,6 +3,18 @@
     {
       "source": "/api/:path*",
       "destination": "https://api.cloudflare.com/client/v4/:path*"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ]
 }
