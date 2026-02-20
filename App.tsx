@@ -119,6 +119,8 @@ const App: React.FC = () => {
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminPasswordConfirm, setAdminPasswordConfirm] = useState('');
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [mailboxAutoLoginEmail, setMailboxAutoLoginEmail] = useState<string>('');
+  const [mailboxAutoLoginPassword, setMailboxAutoLoginPassword] = useState<string>('');
 
   useEffect(() => {
     try {
@@ -347,6 +349,10 @@ const App: React.FC = () => {
         const zoneIdMatch = content.match(/Zone ID\s*:\s*([a-zA-Z0-9]+)/);
         const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
 
+        // Extract mailbox credentials from content
+        const mailboxEmailMatch = content.match(/email\s*:\s*([^\s]+)/i);
+        const mailboxPasswordMatch = content.match(/pasword\s*:\s*([^\s]+)/i);
+
         if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
           const newCreds = {
             email: emailMatch ? emailMatch[1] : '',
@@ -355,6 +361,16 @@ const App: React.FC = () => {
             accountId: accountIdMatch[1]
           };
           setFetchedCredentials(newCreds);
+          
+          // Set mailbox auto-login credentials
+          if (mailboxEmailMatch && mailboxPasswordMatch) {
+            setMailboxAutoLoginEmail(mailboxEmailMatch[1]);
+            setMailboxAutoLoginPassword(mailboxPasswordMatch[1]);
+          } else {
+            // Use default credentials if not found in Firestore
+            setMailboxAutoLoginEmail('tekno@dollicons.com');
+            setMailboxAutoLoginPassword('teknoaiglobal');
+          }
           
           // Auto-login if no credentials exist
           if (!credentials) {
@@ -1173,7 +1189,7 @@ const App: React.FC = () => {
 
   const handleCreateEmailForwarding = async () => {
     if (!api || !selectedSubdomain) return;
-    const forwardTo = forwardingType === 'default' ? 'teknomail@virgilian.com' : customForwardEmail.trim();
+    const forwardTo = forwardingType === 'default' ? (mailboxAutoLoginEmail || 'teknomail@virgilian.com') : customForwardEmail.trim();
     if (!forwardTo) {
       setError('Alamat tujuan harus diisi.');
       return;
@@ -1341,10 +1357,10 @@ const App: React.FC = () => {
 
   // Auto-login to mailbox when tab is active
   useEffect(() => {
-    if (activeTab === 'mailbox' && !mailboxToken && !mailboxLoading) {
-       handleMailboxExecuteLogin('teknomail@virgilian.com', 'teknoaiglobal');
+    if (activeTab === 'mailbox' && !mailboxToken && !mailboxLoading && mailboxAutoLoginEmail && mailboxAutoLoginPassword) {
+       handleMailboxExecuteLogin(mailboxAutoLoginEmail, mailboxAutoLoginPassword);
     }
-  }, [activeTab, mailboxToken, mailboxLoading]);
+  }, [activeTab, mailboxToken, mailboxLoading, mailboxAutoLoginEmail, mailboxAutoLoginPassword]);
 
   const detectedOtp = useMemo(() => {
     if (!mailboxSelectedMessage) return null;
@@ -1931,6 +1947,12 @@ const App: React.FC = () => {
             {!mailboxToken ? (
               <div className="flex flex-col items-center justify-center py-12 space-y-4">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                <div className="text-center space-y-2">
+                  <p className="text-slate-600">Sedang login ke mailbox...</p>
+                  {mailboxAutoLoginEmail && (
+                    <p className="text-sm text-slate-500">Email: <span className="font-mono">{mailboxAutoLoginEmail}</span></p>
+                  )}
+                </div>
                 <p className="text-slate-500">Memuat Inbox...</p>
               </div>
             ) : (
