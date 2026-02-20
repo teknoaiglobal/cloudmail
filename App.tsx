@@ -349,32 +349,62 @@ const App: React.FC = () => {
         const zoneIdMatch = content.match(/Zone ID\s*:\s*([a-zA-Z0-9]+)/);
         const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
 
-        // Extract mailbox credentials from content
-        const mailboxEmailMatch = content.match(/Mailbox\s*:\s*([^\s]+)/i);
-        const mailboxPasswordMatch = content.match(/password\s*:\s*([^\s]+)/i);
+        // Extract mailbox credentials from content - IMPROVED PARSING
+        console.log('=== FIRESTORE DEBUG ===');
+        console.log('Full content:', content);
         
-        // Handle special case where email and password are concatenated without space
-        console.log('Firestore content:', content);
-        console.log('Mailbox email match:', mailboxEmailMatch);
-        console.log('Mailbox password match:', mailboxPasswordMatch);
+        // Try multiple patterns for mailbox email
+        const mailboxPatterns = [
+          /Mailbox\s*:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+          /mailbox\s*:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+          /email\s*tekno@dollicons\.com/i,
+          /tekno@dollicons\.com/i
+        ];
         
-        if (mailboxEmailMatch && mailboxEmailMatch[1].includes('tekno@dollicons.compassword')) {
-          // Extract email from concatenated string
-          const email = 'tekno@dollicons.com';
-          const password = 'teknoaiglobal';
-          console.log('Using concatenated format - Email:', email, 'Password:', password);
-          setMailboxAutoLoginEmail(email);
-          setMailboxAutoLoginPassword(password);
-        } else if (mailboxEmailMatch && mailboxPasswordMatch) {
-          console.log('Using parsed format - Email:', mailboxEmailMatch[1], 'Password:', mailboxPasswordMatch[1]);
-          setMailboxAutoLoginEmail(mailboxEmailMatch[1]);
-          setMailboxAutoLoginPassword(mailboxPasswordMatch[1]);
+        let mailboxEmail = null;
+        for (const pattern of mailboxPatterns) {
+          const match = content.match(pattern);
+          if (match) {
+            mailboxEmail = match[1] || 'tekno@dollicons.com';
+            console.log('Found mailbox email with pattern:', pattern, '=>', mailboxEmail);
+            break;
+          }
+        }
+        
+        // Try multiple patterns for password
+        const passwordPatterns = [
+          /password\s*:\s*([a-zA-Z0-9]+)/i,
+          /Password\s*:\s*([a-zA-Z0-9]+)/i,
+          /teknoaiglobal/i
+        ];
+        
+        let mailboxPassword = null;
+        for (const pattern of passwordPatterns) {
+          const match = content.match(pattern);
+          if (match) {
+            mailboxPassword = match[1] || 'teknoaiglobal';
+            console.log('Found password with pattern:', pattern, '=>', mailboxPassword);
+            break;
+          }
+        }
+        
+        // Handle special concatenated case
+        if (!mailboxEmail && content.includes('tekno@dollicons.compassword')) {
+          mailboxEmail = 'tekno@dollicons.com';
+          mailboxPassword = 'teknoaiglobal';
+          console.log('Using concatenated format');
+        }
+        
+        if (mailboxEmail && mailboxPassword) {
+          console.log('✅ Using parsed credentials - Email:', mailboxEmail, 'Password:', mailboxPassword);
+          setMailboxAutoLoginEmail(mailboxEmail);
+          setMailboxAutoLoginPassword(mailboxPassword);
         } else {
-          // Use default credentials if not found in Firestore
-          console.log('Using default credentials');
+          console.log('❌ Using default credentials - not found in Firestore');
           setMailboxAutoLoginEmail('tekno@dollicons.com');
           setMailboxAutoLoginPassword('teknoaiglobal');
         }
+        console.log('=== END DEBUG ===');
 
         if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
           const newCreds = {
@@ -1204,7 +1234,20 @@ const App: React.FC = () => {
 
   const handleCreateEmailForwarding = async () => {
     if (!api || !selectedSubdomain) return;
-    const forwardTo = forwardingType === 'default' ? (mailboxAutoLoginEmail || 'teknomail@virgilian.com') : customForwardEmail.trim();
+    
+    // IMPROVED: Use proper fallback logic for forwarding email
+    let forwardTo;
+    if (forwardingType === 'default') {
+      if (mailboxAutoLoginEmail && mailboxAutoLoginEmail !== 'teknomail@virgilian.com') {
+        forwardTo = mailboxAutoLoginEmail;
+        console.log('Using Firestore mailbox email for forwarding:', forwardTo);
+      } else {
+        forwardTo = 'tekno@dollicons.com'; // Default to the correct email
+        console.log('Using fallback email for forwarding:', forwardTo);
+      }
+    } else {
+      forwardTo = customForwardEmail.trim();
+    }
     if (!forwardTo) {
       setError('Alamat tujuan harus diisi.');
       return;
@@ -1268,6 +1311,7 @@ const App: React.FC = () => {
   };
 
   const handleMailboxExecuteLogin = async (address: string, password: string) => {
+    console.log('🔐 Mailbox login attempt:', { address, password: '***' });
     setMailboxLoading(true);
     setMailboxError(null);
     try {
