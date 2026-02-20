@@ -350,8 +350,24 @@ const App: React.FC = () => {
         const accountIdMatch = content.match(/Account ID\s*:\s*([a-zA-Z0-9]+)/);
 
         // Extract mailbox credentials from content
-        const mailboxEmailMatch = content.match(/email\s*:\s*([^\s]+)/i);
-        const mailboxPasswordMatch = content.match(/pasword\s*:\s*([^\s]+)/i);
+        const mailboxEmailMatch = content.match(/Mailbox\s*:\s*([^\s]+)/i);
+        const mailboxPasswordMatch = content.match(/password\s*:\s*([^\s]+)/i);
+        
+        // Handle special case where email and password are concatenated without space
+        if (mailboxEmailMatch && mailboxEmailMatch[1].includes('tekno@dollicons.compassword')) {
+          // Extract email from concatenated string
+          const email = 'tekno@dollicons.com';
+          const password = 'teknoaiglobal';
+          setMailboxAutoLoginEmail(email);
+          setMailboxAutoLoginPassword(password);
+        } else if (mailboxEmailMatch && mailboxPasswordMatch) {
+          setMailboxAutoLoginEmail(mailboxEmailMatch[1]);
+          setMailboxAutoLoginPassword(mailboxPasswordMatch[1]);
+        } else {
+          // Use default credentials if not found in Firestore
+          setMailboxAutoLoginEmail('tekno@dollicons.com');
+          setMailboxAutoLoginPassword('teknoaiglobal');
+        }
 
         if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
           const newCreds = {
@@ -362,15 +378,7 @@ const App: React.FC = () => {
           };
           setFetchedCredentials(newCreds);
           
-          // Set mailbox auto-login credentials
-          if (mailboxEmailMatch && mailboxPasswordMatch) {
-            setMailboxAutoLoginEmail(mailboxEmailMatch[1]);
-            setMailboxAutoLoginPassword(mailboxPasswordMatch[1]);
-          } else {
-            // Use default credentials if not found in Firestore
-            setMailboxAutoLoginEmail('tekno@dollicons.com');
-            setMailboxAutoLoginPassword('teknoaiglobal');
-          }
+
           
           // Auto-login if no credentials exist
           if (!credentials) {
