@@ -354,17 +354,24 @@ const App: React.FC = () => {
         const mailboxPasswordMatch = content.match(/password\s*:\s*([^\s]+)/i);
         
         // Handle special case where email and password are concatenated without space
+        console.log('Firestore content:', content);
+        console.log('Mailbox email match:', mailboxEmailMatch);
+        console.log('Mailbox password match:', mailboxPasswordMatch);
+        
         if (mailboxEmailMatch && mailboxEmailMatch[1].includes('tekno@dollicons.compassword')) {
           // Extract email from concatenated string
           const email = 'tekno@dollicons.com';
           const password = 'teknoaiglobal';
+          console.log('Using concatenated format - Email:', email, 'Password:', password);
           setMailboxAutoLoginEmail(email);
           setMailboxAutoLoginPassword(password);
         } else if (mailboxEmailMatch && mailboxPasswordMatch) {
+          console.log('Using parsed format - Email:', mailboxEmailMatch[1], 'Password:', mailboxPasswordMatch[1]);
           setMailboxAutoLoginEmail(mailboxEmailMatch[1]);
           setMailboxAutoLoginPassword(mailboxPasswordMatch[1]);
         } else {
           // Use default credentials if not found in Firestore
+          console.log('Using default credentials');
           setMailboxAutoLoginEmail('tekno@dollicons.com');
           setMailboxAutoLoginPassword('teknoaiglobal');
         }
