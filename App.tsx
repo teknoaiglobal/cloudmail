@@ -1617,20 +1617,29 @@ const App: React.FC = () => {
     >
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center justify-between px-4 py-4 bg-white rounded-xl border border-slate-200 shadow-sm">
-          <div className={`flex flex-col items-center ${activeTab === 'subdomains' ? 'text-blue-600' : 'text-slate-400'}`}>
+          <button
+            onClick={() => setActiveTab('subdomains')}
+            className={`flex flex-col items-center ${activeTab === 'subdomains' ? 'text-blue-600' : 'text-slate-400'} hover:opacity-80 transition-opacity`}
+          >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 ${activeTab === 'subdomains' ? 'border-blue-600 bg-blue-50' : 'border-slate-300'}`}>1</div>
             <span className="text-xs font-medium mt-1">Subdomain</span>
-          </div>
+          </button>
           <div className="flex-1 h-0.5 bg-slate-200 mx-4"></div>
-          <div className={`flex flex-col items-center ${activeTab === 'emails' ? 'text-blue-600' : 'text-slate-400'}`}>
+          <button
+            onClick={() => setActiveTab('emails')}
+            className={`flex flex-col items-center ${activeTab === 'emails' ? 'text-blue-600' : 'text-slate-400'} hover:opacity-80 transition-opacity`}
+          >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 ${activeTab === 'emails' ? 'border-blue-600 bg-blue-50' : 'border-slate-300'}`}>2</div>
             <span className="text-xs font-medium mt-1">Email & Forward</span>
-          </div>
+          </button>
           <div className="flex-1 h-0.5 bg-slate-200 mx-4"></div>
-          <div className={`flex flex-col items-center ${activeTab === 'mailbox' ? 'text-blue-600' : 'text-slate-400'}`}>
+          <button
+            onClick={() => setActiveTab('mailbox')}
+            className={`flex flex-col items-center ${activeTab === 'mailbox' ? 'text-blue-600' : 'text-slate-400'} hover:opacity-80 transition-opacity`}
+          >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 ${activeTab === 'mailbox' ? 'border-blue-600 bg-blue-50' : 'border-slate-300'}`}>3</div>
             <span className="text-xs font-medium mt-1">Mailbox</span>
-          </div>
+          </button>
         </div>
 
         {error && (
