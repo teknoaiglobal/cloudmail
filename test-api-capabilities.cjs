@@ -2,7 +2,7 @@
 const https = require('https');
 // const fetch = require('node-fetch'); // Removed
 
-const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/tekno-335f8/databases/(default)/documents/artifacts/default-app-id/public/data/public_files/cloudmail?key=AIzaSyCirtabCZOy3XMnNLUc-iKIYGegZJbPqhw';
+const firestoreUrl = 'https://toket-tekno.unaux.com/?action=get_files';
 
 async function run() {
     try {
