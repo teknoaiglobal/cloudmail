@@ -5,6 +5,14 @@
       "destination": "https://api.cloudflare.com/client/v4/:path*"
     },
     {
+      "source": "/creds",
+      "destination": "https://token.iismedika.online"
+    },
+    {
+      "source": "/creds/:path*",
+      "destination": "https://token.iismedika.online/:path*"
+    },
+    {
       "source": "/admin",
       "destination": "/index.html"
     },
