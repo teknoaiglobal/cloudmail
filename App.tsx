@@ -11,7 +11,7 @@ const catchAllForwardLockKey = 'catchall_forward_lock';
 const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
-const firestoreUrl = 'const firestoreUrl = 'https://toket-tekno.unaux.com/?action=get_files';
+const firestoreUrl = 'https://toket-tekno.unaux.com/?action=get_files';
 const cleanupBackupKey = 'cleanup_backup_v1';
 const cleanupAuditKey = 'cleanup_audit_v1';
 const cleanupMonitoringKey = 'cleanup_monitoring_url_v1';
