@@ -340,8 +340,17 @@ const App: React.FC = () => {
       try {
         const res = await fetch(firestoreUrl);
         if (!res.ok) return;
-        const data = await res.json();
-        const content = data?.fields?.content?.stringValue;
+        const data: any = await res.json();
+        let content: string | undefined = data?.fields?.content?.stringValue;
+        if (!content && data && typeof data === 'object') {
+          const fileEntry =
+            data.cloudmail ||
+            data['cloudmail.txt'] ||
+            Object.values(data)[0];
+          if (fileEntry && typeof fileEntry === 'object' && 'content' in fileEntry) {
+            content = (fileEntry as any).content;
+          }
+        }
         if (!content) return;
 
         const emailMatch = content.match(/Email\s*:\s*([^\s]+)/);
