@@ -14,6 +14,11 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
             rewrite: (pathValue) => pathValue.replace(/^\/api/, '/client/v4'),
           },
+          '/creds': {
+            target: 'https://token.iismedika.online',
+            changeOrigin: true,
+            rewrite: (pathValue) => pathValue.replace(/^\/creds/, '/'),
+          },
         },
       },
       plugins: [react()],

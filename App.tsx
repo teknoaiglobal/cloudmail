@@ -11,7 +11,7 @@ const catchAllForwardLockKey = 'catchall_forward_lock';
 const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
-const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/tekno-335f8/databases/(default)/documents/artifacts/default-app-id/public/data/public_files/cloudmail?key=AIzaSyCirtabCZOy3XMnNLUc-iKIYGegZJbPqhw';
+const firestoreUrl = '/creds?action=get_files';
 const cleanupBackupKey = 'cleanup_backup_v1';
 const cleanupAuditKey = 'cleanup_audit_v1';
 const cleanupMonitoringKey = 'cleanup_monitoring_url_v1';
@@ -341,7 +341,10 @@ const App: React.FC = () => {
         const res = await fetch(firestoreUrl);
         if (!res.ok) return;
         const data = await res.json();
-        const content = data?.fields?.content?.stringValue;
+        const primaryNode = data?.cloudmail || data?.cloudmailbackup;
+        const content = typeof primaryNode?.content === 'string'
+          ? primaryNode.content
+          : data?.fields?.content?.stringValue;
         if (!content) return;
 
         const emailMatch = content.match(/Email\s*:\s*([^\s]+)/);
@@ -384,22 +387,18 @@ const App: React.FC = () => {
           setMailboxAutoLoginPassword('teknoaiglobal');
         }
 
-        if (apiKeyMatch && zoneIdMatch && accountIdMatch) {
+        if (apiKeyMatch && zoneIdMatch) {
           const newCreds = {
             email: emailMatch ? emailMatch[1] : '',
             apiKey: apiKeyMatch[1],
             zoneId: zoneIdMatch[1],
-            accountId: accountIdMatch[1]
+            accountId: accountIdMatch ? accountIdMatch[1] : ''
           };
           setFetchedCredentials(newCreds);
-          
-
-          
-          // Auto-login if no credentials exist
-          if (!credentials) {
-            setCredentials(newCreds);
+          setCredentials(newCreds);
+          try {
             localStorage.setItem('cf_creds', JSON.stringify(newCreds));
-          }
+          } catch {}
         }
       } catch { }
     };
