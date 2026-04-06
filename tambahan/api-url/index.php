@@ -14,7 +14,14 @@ $action = $_GET['action'] ?? '';
 if ($action) {
     header('Content-Type: application/json');
     header('Access-Control-Allow-Origin: *');
-    
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(200);
+        exit;
+    }
+
     $method = $_SERVER['REQUEST_METHOD'];
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -401,11 +408,17 @@ if ($action) {
             }, [activeFile]);
 
             // 4. Sync data content local
+            const prevActiveFileRef = useRef(activeFile);
             useEffect(() => {
+                const isFileChanged = prevActiveFileRef.current !== activeFile;
+                prevActiveFileRef.current = activeFile;
+
                 if (activeFile && filesData[activeFile]) {
-                    // Update content only if not currently typing
+                    // Update content only if not currently typing, OR if we just switched tabs
                     const serverContent = filesData[activeFile].content || '';
-                    if (content === '' && serverContent !== '') setContent(serverContent);
+                    if (isFileChanged || (content === '' && serverContent !== '')) {
+                        setContent(serverContent);
+                    }
                     if (filesData[activeFile].updatedAt) setLastSaved(new Date(filesData[activeFile].updatedAt.seconds * 1000));
                 } else if (activeFile && Object.keys(filesData).length > 0 && !filesData[activeFile]) {
                     // Hanya reset content jika filesData sudah selesai di-fetch dan file benar-benar tidak ada di server
@@ -415,8 +428,8 @@ if ($action) {
             }, [activeFile, filesData[activeFile]]);
 
             // Force refresh when clicked
-            const refreshContent = () => {
-                if(activeFile && filesData[activeFile]) setContent(filesData[activeFile].content || '');
+            const refreshContent = (targetFile = activeFile) => {
+                if(targetFile && filesData[targetFile]) setContent(filesData[targetFile].content || '');
             };
 
             // Auto-paste URL token
@@ -532,7 +545,7 @@ if ($action) {
                     <div className="bg-slate-50 border-b border-slate-200 overflow-x-auto flex items-center justify-between pr-2">
                         <div className="flex px-2 overflow-x-auto">
                             {fileList.map((file) => (
-                                <button key={file} onClick={() => {setActiveFile(file); refreshContent();}} className={`px-4 py-3 text-sm font-mono whitespace-nowrap border-b-2 transition-colors ${activeFile === file ? 'border-blue-600 text-blue-700 font-bold bg-white' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}>{file}</button>
+                                <button key={file} onClick={() => {setActiveFile(file); refreshContent(file);}} className={`px-4 py-3 text-sm font-mono whitespace-nowrap border-b-2 transition-colors ${activeFile === file ? 'border-blue-600 text-blue-700 font-bold bg-white' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}>{file}</button>
                             ))}
                         </div>
                         <button onClick={handleCreateFile} className="ml-2 p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold whitespace-nowrap" title="Buat File Baru"><Plus className="w-4 h-4" /> Baru</button>
