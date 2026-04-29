@@ -122,6 +122,76 @@ const App: React.FC = () => {
   const [mailboxAutoLoginEmail, setMailboxAutoLoginEmail] = useState<string>('');
   const [mailboxAutoLoginPassword, setMailboxAutoLoginPassword] = useState<string>('');
 
+  const [isVoucherVerified, setIsVoucherVerified] = useState(false);
+  const [voucherInput, setVoucherInput] = useState('');
+  const [voucherError, setVoucherError] = useState<string | null>(null);
+  const [voucherLoading, setVoucherLoading] = useState(false);
+
+  useEffect(() => {
+    const verified = localStorage.getItem('isVoucherVerified');
+    const exp = localStorage.getItem('voucherExp');
+    if (verified === 'true') {
+      if (exp && parseInt(exp) < Date.now()) {
+         localStorage.removeItem('isVoucherVerified');
+         localStorage.removeItem('voucherEmail');
+         localStorage.removeItem('voucherExp');
+      } else {
+         setIsVoucherVerified(true);
+      }
+    }
+  }, []);
+
+  const handleVerifyVoucher = async () => {
+    if (!api || !settings) {
+      setVoucherError('Sistem sedang memuat konfigurasi server, silakan tunggu sebentar lalu coba lagi.');
+      return;
+    }
+    if (!voucherInput) {
+      setVoucherError('Email voucher harus diisi.');
+      return;
+    }
+    setVoucherLoading(true);
+    setVoucherError(null);
+    try {
+      const domainName = settings.name.replace(/\.$/, '');
+      const zoneRecords = await api.listZoneDnsRecords();
+      const records = zoneRecords.result || [];
+      const memberPrefix = `_member.${domainName}`;
+      
+      const memberRecord = records.find((r: any) => 
+         r.type === 'TXT' && 
+         r.name === memberPrefix && 
+         r.content && 
+         r.content.includes(`email:${voucherInput}`)
+      );
+
+      if (memberRecord) {
+        const expMatch = memberRecord.content.match(/exp:(\d+)/);
+        if (expMatch) {
+           const expTime = parseInt(expMatch[1]);
+           if (expTime < Date.now()) {
+               setVoucherError('Voucher langganan Anda telah kedaluwarsa. Silakan hubungi admin untuk perpanjangan.');
+               setVoucherLoading(false);
+               return;
+           }
+           localStorage.setItem('voucherExp', expTime.toString());
+        } else {
+           localStorage.removeItem('voucherExp');
+        }
+
+        setIsVoucherVerified(true);
+        localStorage.setItem('isVoucherVerified', 'true');
+        localStorage.setItem('voucherEmail', voucherInput);
+      } else {
+        setVoucherError('Voucher email tidak terdaftar atau tidak valid.');
+      }
+    } catch (err: any) {
+      setVoucherError('Terjadi kesalahan: ' + err.message);
+    } finally {
+      setVoucherLoading(false);
+    }
+  };
+
   useEffect(() => {
     try {
       const savedLog = localStorage.getItem(cleanupAuditKey);
@@ -1541,6 +1611,48 @@ const App: React.FC = () => {
           <p className="text-slate-500">Silakan masukkan kredensial Cloudflare Anda untuk memulai.</p>
         </div>
       </Layout>
+    );
+  }
+
+  if (!isVoucherVerified) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Background decorations */}
+        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-cyan-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+        
+        <div className="bg-white/80 backdrop-blur-xl p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200/50 relative z-10">
+           <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
+               <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+               </svg>
+           </div>
+           <h2 className="text-2xl font-bold text-center mb-2 text-slate-800">Login Member</h2>
+           <p className="text-slate-500 text-sm mb-6 text-center">
+             Aplikasi ini eksklusif untuk member langganan. Silakan masukkan email voucher Anda.
+           </p>
+           {voucherError && (
+             <div className="p-3 bg-red-50/80 text-red-600 rounded-lg text-sm mb-4 border border-red-100">
+               {voucherError}
+             </div>
+           )}
+           <div className="space-y-4">
+              <Input 
+                 placeholder="Masukkan Email Voucher" 
+                 value={voucherInput}
+                 onChange={(e) => setVoucherInput(e.target.value)}
+                 className="bg-white/50"
+              />
+              <Button 
+                 onClick={handleVerifyVoucher} 
+                 disabled={voucherLoading || !voucherInput} 
+                 className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 shadow-md shadow-blue-500/25 transition-all duration-300 transform hover:-translate-y-0.5"
+              >
+                 {voucherLoading ? 'Memverifikasi...' : 'Masuk Sekarang'}
+              </Button>
+           </div>
+        </div>
+      </div>
     );
   }
 
