@@ -200,56 +200,10 @@ const App: React.FC = () => {
     generateFingerprint();
   }, []);
 
-  // Cooldown Timer Logic (Merged Local + DNS)
+  // Cooldown Timer Logic (Merged Local + DNS) - Removed for unlimited generation
   useEffect(() => {
-    const checkCooldown = () => {
-        let lastCreatedTime = 0;
-
-        // 1. Check Local Storage
-        const localLast = localStorage.getItem('last_subdomain_created');
-        if (localLast) {
-            lastCreatedTime = parseInt(localLast);
-        }
-
-        // 2. Check DNS Records (Persistent Global Lock)
-        if (userFingerprint && zoneDnsRecords.length > 0) {
-            // Look for TXT records starting with _owner and containing our fingerprint
-            zoneDnsRecords.forEach(record => {
-                if (record.type === 'TXT' && record.name.startsWith('_owner.') && record.content) {
-                    if (record.content.includes(`created_by:${userFingerprint}`)) {
-                        const timeMatch = record.content.match(/time:(\d+)/);
-                        if (timeMatch) {
-                            const dnsTime = parseInt(timeMatch[1]);
-                            if (dnsTime > lastCreatedTime) {
-                                lastCreatedTime = dnsTime;
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        if (lastCreatedTime > 0) {
-            const diff = Date.now() - lastCreatedTime;
-            const eightHours = 8 * 60 * 60 * 1000;
-            if (diff < eightHours) {
-                const remaining = eightHours - diff;
-                const h = Math.floor(remaining / (1000 * 60 * 60));
-                const m = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-                const s = Math.floor((remaining % (1000 * 60)) / 1000);
-                setCooldownTime(`${h} jam ${m} menit ${s} detik`);
-            } else {
-                setCooldownTime(null);
-            }
-        } else {
-            setCooldownTime(null);
-        }
-    };
-    
-    checkCooldown();
-    const interval = setInterval(checkCooldown, 1000);
-    return () => clearInterval(interval);
-  }, [userFingerprint, zoneDnsRecords]);
+    setCooldownTime(null);
+  }, []);
 
   // --- Step 2: Email & Forwarding State ---
   const [selectedSubdomain, setSelectedSubdomain] = useState('');
@@ -311,8 +265,8 @@ const App: React.FC = () => {
       if (savedEmails) {
         const parsed: { email: string; createdAt: number }[] = JSON.parse(savedEmails);
         const now = Date.now();
-        // Filter valid emails (1 hour = 3600000 ms)
-        const valid = parsed.filter(e => now - e.createdAt < 3600000);
+        // Filter valid emails (5 minutes = 300000 ms)
+        const valid = parsed.filter(e => now - e.createdAt < 300000);
         setCreatedEmailsList(valid);
         if (valid.length !== parsed.length) {
            localStorage.setItem('created_emails_history', JSON.stringify(valid));
@@ -320,17 +274,17 @@ const App: React.FC = () => {
       }
     } catch {}
 
-    // Cleanup interval every minute
+    // Cleanup interval every 30 seconds for UI
     const interval = setInterval(() => {
        setCreatedEmailsList(prev => {
           const now = Date.now();
-          const valid = prev.filter(e => now - e.createdAt < 3600000);
+          const valid = prev.filter(e => now - e.createdAt < 300000);
           if (valid.length !== prev.length) {
               localStorage.setItem('created_emails_history', JSON.stringify(valid));
           }
           return valid;
        });
-    }, 60000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, []);
@@ -948,12 +902,7 @@ const App: React.FC = () => {
   const handleAddSubdomain = async () => {
     if (!api || !settings) return;
     
-    // Rate Limiting Check
-    const lastCreated = localStorage.getItem('last_subdomain_created');
-    if (lastCreated && Date.now() - parseInt(lastCreated) < 15000) {
-      setError('Mohon tunggu beberapa detik sebelum membuat subdomain baru.');
-      return;
-    }
+    // Rate Limiting Check removed for unlimited generation
 
     const raw = subdomainInput.trim().toLowerCase();
     if (!raw) return;
@@ -1160,32 +1109,92 @@ const App: React.FC = () => {
   useEffect(() => { handleDeleteRef.current = handleDeleteSubdomain; }, [handleDeleteSubdomain]);
 
   useEffect(() => {
-    const checkExpired = () => {
+    const checkExpired = async () => {
+       if (!api || !settings) return;
        const now = Date.now();
        const keys = Object.keys(localStorage);
+       
+       // 1. Check expired subdomains (older than 5 minutes)
+       const expiredSubdomains: string[] = [];
        keys.forEach(key => {
           if (key.startsWith('subdomain_timer_')) {
              const sub = key.replace('subdomain_timer_', '');
              const createdStr = localStorage.getItem(key);
              if (createdStr) {
                 const created = parseInt(createdStr, 10);
-                // 24 hours = 24 * 60 * 60 * 1000 = 86400000
-                if (now - created > 86400000) {
-                   console.log(`Auto-deleting expired subdomain: ${sub}`);
-                   handleDeleteRef.current(sub, true);
+                // 5 minutes = 5 * 60 * 1000 = 300000 ms
+                if (now - created > 300000) {
+                   console.log(`Auto-deleting expired subdomain (5 mins): ${sub}`);
+                   expiredSubdomains.push(sub);
                 }
              }
           }
        });
+
+       // Process expired subdomains one by one
+       for (const sub of expiredSubdomains) {
+          await handleDeleteRef.current(sub, true);
+       }
+
+       // 2. Check expired forwarding rules (older than 5 minutes)
+       // Get history of created emails
+       const savedEmailsStr = localStorage.getItem('created_emails_history');
+       if (savedEmailsStr) {
+           try {
+               const history: { email: string; createdAt: number; ruleId?: string }[] = JSON.parse(savedEmailsStr);
+               const activeHistory = [];
+               let historyChanged = false;
+               
+               for (const item of history) {
+                   // If older than 5 minutes
+                   if (now - item.createdAt > 300000) {
+                       console.log(`Auto-deleting expired forwarding rule for: ${item.email}`);
+                       historyChanged = true;
+                       
+                       // We need to find the rule ID to delete it
+                       try {
+                           // Fetch rules if we don't have them yet, or find by name/match
+                           const res = await api.listRules();
+                           const allRules = res.result || [];
+                           
+                           // Find the rule that matches this email
+                           const ruleToDelete = allRules.find((r: any) => 
+                               r.matchers?.some((m: any) => 
+                                   m.field === 'to' && m.type === 'literal' && m.value === item.email
+                               )
+                           );
+                           
+                           if (ruleToDelete) {
+                               await api.deleteRule(ruleToDelete.id);
+                               console.log(`Successfully deleted rule: ${ruleToDelete.id} for ${item.email}`);
+                           }
+                       } catch (e) {
+                           console.error(`Failed to auto-delete rule for ${item.email}:`, e);
+                           // Keep in history if delete failed so we try again? 
+                           // For now, let's remove from history to prevent endless loops if API errors persist
+                       }
+                   } else {
+                       activeHistory.push(item);
+                   }
+               }
+               
+               if (historyChanged) {
+                   localStorage.setItem('created_emails_history', JSON.stringify(activeHistory));
+                   setCreatedEmailsList(activeHistory);
+               }
+           } catch (e) {
+               console.error('Error processing auto-delete rules:', e);
+           }
+       }
     };
     
-    // Check every minute
+    // Check every 1 minute
     const interval = setInterval(checkExpired, 60000);
     // Also check on mount
     checkExpired();
     
     return () => clearInterval(interval);
-  }, []);
+  }, [api, settings]);
 
   // --- Step 2 Actions ---
   // Timer Logic
@@ -1196,19 +1205,17 @@ const App: React.FC = () => {
     if (!createdStr) return;
 
     const created = parseInt(createdStr, 10);
-    const expires = created + 24 * 60 * 60 * 1000;
+    const expires = created + 5 * 60 * 1000; // 5 minutes
 
     const updateTimer = () => {
       const now = Date.now();
       const diff = expires - now;
       if (diff <= 0) {
-        setSubdomainTimer('Expired');
-        // Optional: auto-delete logic here if required
+        setSubdomainTimer('Expired (Auto-Deleting...)');
       } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setSubdomainTimer(`${hours}h ${minutes}m ${seconds}s`);
+        setSubdomainTimer(`${minutes}m ${seconds}s`);
       }
     };
 
@@ -1680,26 +1687,6 @@ const App: React.FC = () => {
         {activeTab === 'subdomains' && (
           <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
             
-            {cooldownTime ? (
-               <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
-                  <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mb-2">
-                     <svg className="w-8 h-8 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                     </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900">Akses Dibatasi Sementara</h3>
-                  <p className="text-slate-500 max-w-md">
-                     Untuk mencegah penyalahgunaan, Anda harus menunggu <strong>8 jam</strong> setelah membuat subdomain sebelum dapat mengakses menu ini kembali.
-                  </p>
-                  <div className="bg-orange-50 px-4 py-2 rounded-lg border border-orange-100 text-orange-700 font-mono font-bold text-lg">
-                     {cooldownTime}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-4">
-                     Subdomain Anda yang sudah ada akan dihapus otomatis dalam 24 jam.
-                  </p>
-               </div>
-            ) : (
-             <>
             {/* Domain Selector (Universal) */}
             <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex flex-col md:flex-row md:items-center gap-4">
                <div className="flex-1">
@@ -1801,8 +1788,6 @@ const App: React.FC = () => {
             )}
 
             {/* History List moved */}
-             </>
-            )}
           </div>
         )}
 
@@ -1928,7 +1913,7 @@ const App: React.FC = () => {
             {/* History List */}
             {createdEmailsList.length > 0 && (
               <div className="pt-6 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2">
-                <h3 className="text-sm font-semibold text-slate-900 mb-3">Riwayat Email (Aktif 1 Jam)</h3>
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">Riwayat Email (Aktif 5 Menit)</h3>
                 <div className="space-y-2">
                   {createdEmailsList
                     .filter(item => {
@@ -1941,7 +1926,7 @@ const App: React.FC = () => {
                       <div className="flex flex-col min-w-0">
                          <code className="text-sm font-mono text-slate-700 break-all">{item.email}</code>
                          <span className="text-xs text-slate-400">
-                           Exp: {new Date(item.createdAt + 3600000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                           Exp: {new Date(item.createdAt + 300000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
                          </span>
                       </div>
                       <Button
