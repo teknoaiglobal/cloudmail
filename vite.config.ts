@@ -14,6 +14,11 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
             rewrite: (pathValue) => pathValue.replace(/^\/api/, '/client/v4'),
           },
+          '/db': {
+            target: 'https://toket.texaproject.com',
+            changeOrigin: true,
+            rewrite: (pathValue) => pathValue.replace(/^\/db/, ''),
+          },
         },
       },
       plugins: [react()],

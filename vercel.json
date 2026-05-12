@@ -5,6 +5,10 @@
       "destination": "https://api.cloudflare.com/client/v4/:path*"
     },
     {
+      "source": "/db/:path*",
+      "destination": "https://toket.texaproject.com/:path*"
+    },
+    {
       "source": "/admin",
       "destination": "/index.html"
     },

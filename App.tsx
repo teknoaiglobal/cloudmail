@@ -11,7 +11,7 @@ const catchAllForwardLockKey = 'catchall_forward_lock';
 const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
-const firestoreUrl = 'https://toket.texaproject.com/?action=get_files';
+const firestoreUrl = '/db/?action=get_files';
 const cleanupBackupKey = 'cleanup_backup_v1';
 const cleanupAuditKey = 'cleanup_audit_v1';
 const cleanupMonitoringKey = 'cleanup_monitoring_url_v1';
@@ -96,6 +96,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('subdomains');
   const [credentials, setCredentials] = useState<CloudflareCredentials | null>(loadCredentials);
   const [fetchedCredentials, setFetchedCredentials] = useState<Partial<CloudflareCredentials> | undefined>(undefined);
+  const [autoLoginLoading, setAutoLoginLoading] = useState(true);
 
   // --- Data State ---
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -291,9 +292,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const fetchFirestore = async () => {
+      setAutoLoginLoading(true);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
       try {
-        const res = await fetch(firestoreUrl);
-        if (!res.ok) return;
+        const res = await fetch(firestoreUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!res.ok) {
+          setAutoLoginLoading(false);
+          return;
+        }
         const data: any = await res.json();
         let content: string | undefined = data?.fields?.content?.stringValue;
         if (!content && data && typeof data === 'object') {
@@ -362,7 +370,11 @@ const App: React.FC = () => {
             localStorage.setItem('cf_creds', JSON.stringify(newCreds));
           }
         }
-      } catch { }
+      } catch { 
+        // ignore errors
+      } finally {
+        setAutoLoginLoading(false);
+      }
     };
     fetchFirestore();
   }, []);
@@ -1543,6 +1555,17 @@ const App: React.FC = () => {
 
   // --- Render ---
   if (!credentials) {
+    if (autoLoginLoading) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center space-y-4">
+            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-slate-600 font-medium">Mengecek kredensial Auto-Login...</p>
+          </div>
+        </div>
+      );
+    }
+    
     return (
       <Layout 
         credentials={null} 
