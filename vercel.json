@@ -6,11 +6,11 @@
     },
     {
       "source": "/creds",
-      "destination": "https://token.iismedika.online"
+      "destination": "https://toket.texaproject.com/"
     },
     {
       "source": "/creds/:path*",
-      "destination": "https://token.iismedika.online/:path*"
+      "destination": "https://toket.texaproject.com/:path*"
     },
     {
       "source": "/admin",
