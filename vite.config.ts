@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
             rewrite: (pathValue) => pathValue.replace(/^\/api/, '/client/v4'),
           },
           '/creds': {
-            target: 'https://token.iismedika.online',
+            target: 'https://toket.texaproject.com',
             changeOrigin: true,
             rewrite: (pathValue) => pathValue.replace(/^\/creds/, '/'),
           },

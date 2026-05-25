@@ -5,7 +5,7 @@ import { Layout } from './components/Layout';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 
-const firestoreUrl = '/creds?action=get_files';
+const firestoreUrl = '/creds?action=get_file&filename=cloudmail-vip';
 
 type MemberRecord = {
   id: string;
@@ -57,7 +57,7 @@ const AdminApp: React.FC = () => {
         const res = await fetch(firestoreUrl);
         if (!res.ok) throw new Error('Gagal memuat kredensial');
         const data = await res.json();
-        const primaryNode = data?.cloudmail || data?.cloudmailbackup;
+        const primaryNode = data?.['cloudmail-vip'] || data?.cloudmail || data?.cloudmailbackup;
         const content = typeof primaryNode?.content === 'string'
           ? primaryNode.content
           : data?.fields?.content?.stringValue;

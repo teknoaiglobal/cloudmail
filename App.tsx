@@ -11,7 +11,7 @@ const catchAllForwardLockKey = 'catchall_forward_lock';
 const catchAllForwardValueKey = 'catchall_forward_value';
 const generatedEmailKey = 'generated_email_entries';
 const mailboxApiBase = 'https://api.mail.tm';
-const firestoreUrl = '/creds?action=get_files';
+const firestoreUrl = '/creds?action=get_file&filename=cloudmail-vip';
 const cleanupBackupKey = 'cleanup_backup_v1';
 const cleanupAuditKey = 'cleanup_audit_v1';
 const cleanupMonitoringKey = 'cleanup_monitoring_url_v1';
@@ -411,7 +411,7 @@ const App: React.FC = () => {
         const res = await fetch(firestoreUrl);
         if (!res.ok) return;
         const data = await res.json();
-        const primaryNode = data?.cloudmail || data?.cloudmailbackup;
+        const primaryNode = data?.['cloudmail-vip'] || data?.cloudmail || data?.cloudmailbackup;
         const content = typeof primaryNode?.content === 'string'
           ? primaryNode.content
           : data?.fields?.content?.stringValue;
@@ -1388,6 +1388,9 @@ const App: React.FC = () => {
 
   const fetchMailboxMessages = async (isAuto = false) => {
     if (!mailboxToken) return;
+    // Cegah tumpang tindih request auto-refresh
+    if (isAuto && mailboxRefreshing) return;
+    
     if (!isAuto) setMailboxRefreshing(true);
     try {
       const res = await fetch(`${mailboxApiBase}/messages?page=1`, {
@@ -1418,14 +1421,26 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!mailboxToken) return;
-    if (mailboxAutoRefresh) {
-      void fetchMailboxMessages(true);
-      mailboxRefreshRef.current = window.setInterval(() => {
-        void fetchMailboxMessages(true);
-      }, 5000);
+    let timeoutId: number;
+    let isMounted = true;
+
+    const pollMessages = async () => {
+      if (!mailboxToken || !mailboxAutoRefresh || !isMounted) return;
+      
+      await fetchMailboxMessages(true);
+      
+      // Gunakan setTimeout berantai (bukan setInterval) agar request tidak menumpuk
+      // Jika server lambat membalas, timer 5 detik baru dihitung setelah request selesai
+      timeoutId = window.setTimeout(pollMessages, 5000);
+    };
+
+    if (mailboxToken && mailboxAutoRefresh) {
+      pollMessages();
     }
+
     return () => {
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
       if (mailboxRefreshRef.current) clearInterval(mailboxRefreshRef.current);
     };
   }, [mailboxAutoRefresh, mailboxToken]);
