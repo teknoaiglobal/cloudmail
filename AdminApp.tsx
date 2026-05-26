@@ -33,6 +33,16 @@ const AdminApp: React.FC = () => {
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminLoginError, setAdminLoginError] = useState<string | null>(null);
 
+  // State untuk form Pengaturan Kredensial
+  const [credEmail, setCredEmail] = useState('');
+  const [credApiKey, setCredApiKey] = useState('');
+  const [credZoneId, setCredZoneId] = useState('');
+  const [credAccountId, setCredAccountId] = useState('');
+  const [credMailbox, setCredMailbox] = useState('');
+  const [credPassword, setCredPassword] = useState('');
+  const [credLoading, setCredLoading] = useState(false);
+  const [credMessage, setCredMessage] = useState('');
+
   useEffect(() => {
     if (localStorage.getItem('adminPanelVerified') === 'true') {
       setIsAdminVerified(true);
@@ -75,6 +85,24 @@ const AdminApp: React.FC = () => {
             zoneId: zoneIdMatch[1],
             accountId: accountIdMatch ? accountIdMatch[1] : ''
           });
+
+          // Set form state
+          setCredEmail(emailMatch ? emailMatch[1] : '');
+          setCredApiKey(apiKeyMatch[1]);
+          setCredZoneId(zoneIdMatch[1]);
+          setCredAccountId(accountIdMatch ? accountIdMatch[1] : '');
+
+          const mailboxLineMatch = content.match(/Mailbox\s*:\s*([^\r\n]+)/i);
+          const mailboxLine = mailboxLineMatch ? mailboxLineMatch[1] : '';
+          const mailboxEmailMatch = mailboxLine.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?=\s|$)/);
+          const mailboxPasswordMatch = content.match(/password\s*:\s*([^\s]+)/i);
+          
+          let mEmail = mailboxEmailMatch ? mailboxEmailMatch[0] : '';
+          let mPass = mailboxPasswordMatch ? mailboxPasswordMatch[1] : '';
+          if (mEmail.includes('password')) mEmail = mEmail.split('password')[0].trim();
+          
+          setCredMailbox(mEmail);
+          setCredPassword(mPass);
         } else {
             throw new Error('Format kredensial tidak valid');
         }
@@ -185,6 +213,37 @@ const AdminApp: React.FC = () => {
       return `https://wa.me/${cleanWa}`;
   };
 
+  const handleSaveCredentials = async () => {
+    setCredLoading(true);
+    setCredMessage('');
+    try {
+      const content = `Email : ${credEmail}\nGlobal API Key / Token : ${credApiKey}\nZone ID : ${credZoneId}\nAccount ID : ${credAccountId}\nMailbox : ${credMailbox} password : ${credPassword}`;
+      
+      const res = await fetch('/creds?action=save_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: 'cloudmail-vip', content })
+      });
+      
+      if (!res.ok) throw new Error('Gagal menyimpan kredensial ke server backend');
+      
+      setCredMessage('Kredensial berhasil disimpan ke server!');
+      
+      setCredentials({
+        email: credEmail,
+        apiKey: credApiKey,
+        zoneId: credZoneId,
+        accountId: credAccountId
+      });
+      
+      setTimeout(() => setCredMessage(''), 3000);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setCredLoading(false);
+    }
+  };
+
   if (!isAdminVerified) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -241,6 +300,23 @@ const AdminApp: React.FC = () => {
         
         {!loading && !error && (
             <div className="space-y-6">
+                {/* Panel Kredensial Server */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 className="text-lg font-semibold mb-4 text-slate-800">Pengaturan Kredensial Server</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <Input label="Cloudflare Email" value={credEmail} onChange={e => setCredEmail(e.target.value)} />
+                        <Input label="Global API Key / Token" type="password" value={credApiKey} onChange={e => setCredApiKey(e.target.value)} />
+                        <Input label="Zone ID" value={credZoneId} onChange={e => setCredZoneId(e.target.value)} />
+                        <Input label="Account ID" value={credAccountId} onChange={e => setCredAccountId(e.target.value)} />
+                        <Input label="Mailbox Email" value={credMailbox} onChange={e => setCredMailbox(e.target.value)} />
+                        <Input label="Mailbox Password" type="text" value={credPassword} onChange={e => setCredPassword(e.target.value)} />
+                    </div>
+                    {credMessage && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{credMessage}</div>}
+                    <Button onClick={handleSaveCredentials} disabled={credLoading} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900">
+                        {credLoading ? 'Menyimpan...' : 'Simpan Kredensial'}
+                    </Button>
+                </div>
+
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 className="text-lg font-semibold mb-4">Tambah Member Baru</h2>
                     <div className="flex flex-col gap-4">
